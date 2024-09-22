@@ -21,7 +21,7 @@ from creation import new
 
 mpl.use("QtAgg")
 
-with open('./settings.json', 'r') as settings_json:
+with open('./settings.json', 'r+') as settings_json:
     settings = json.load(settings_json)
 
 
@@ -37,15 +37,18 @@ class MainWindow(QMainWindow):
         super(MainWindow, self).__init__(*args, **kwargs)
 
         start_path = path.expanduser(settings['recently_opened_folder'])
-        sorted_filetypes = [('CSV', '.csv'), ('Text Files', '.txt')]
-        default_file_type = settings['default_file_type']
 
         filters = 'CSV Files (*.csv);;Text Files (*.txt)'
-        selectedFilter = None
+        selectedFilter = settings['default_file_type']
 
         file_path, filter = QFileDialog.getOpenFileName(
             None, "Choose a filename", start_path,
             filters, selectedFilter)
+
+        settings['recently_opened_folder'] = path.split(file_path)[0]
+        with open('./settings.json', 'r+') as settings_json:
+            settings_json.write(json.dumps(settings))
+
 
         print(file_path, filter)
 
@@ -55,19 +58,28 @@ class MainWindow(QMainWindow):
         self.plot_toolbar = NavigationToolbar(self.canvas, self)
 
         list_of_colors = [
-            "#ff0000",
-            "#ff8700",
-            "#ffd300",
-            "#deff0a",
-            "#a1ff0a",
-            "#0aff99",
-            "#0aefff",
-            "#147df5",
-            "#580aff",
-            "#be0aff",
+            "#E5EEFF",
+            "#99B1D7",
+            "#294D7F",
+            "#287593",
+            "#759387",
+            "#BFA96D",
+            "#B7925E",
+            "#B37953",
+            "#A64C4C",
+            "#9E214B",
+            "#460F26"
         ]
         from plotting import luminescence_dt
         self.canvas.axes = luminescence_dt(self.thermmap.get_data(), self.thermmap.get_temperatures(), self.canvas.axes, colormap=mpl.colors.LinearSegmentedColormap.from_list(name='', colors=list_of_colors, N=len(self.thermmap.get_temperatures())))
+
+        self.first_click = True
+        self.second_click = False
+        self.first_line = None
+        self.second_line = None
+        self.first_line_position = None
+        self.second_line_position = None
+        self.cid = self.canvas.mpl_connect('button_press_event', self.on_click)
 
         layout_main = QVBoxLayout()
         layout_main.addWidget(self.plot_toolbar)
@@ -79,6 +91,41 @@ class MainWindow(QMainWindow):
         widget.setLayout(layout_main)
         self.setCentralWidget(widget)
         self.canvas.draw()
+
+    def on_click(self, event):
+        if event.button == event.button.LEFT:
+            if self.first_click:
+                self.first_line = self.canvas.axes.axvline(event.xdata, ymin=0.1, ymax=0.9, linestyle='--', color='#6D597A', picker=self.on_first_line_pick)
+                self.first_line_position = event.xdata
+                self.first_click = False
+                self.second_click = True
+                self.canvas.draw()
+            elif self.second_click:
+                self.second_line = self.canvas.axes.axvline(event.xdata, ymin=0.1, ymax=0.9, linestyle='--', color='#E56B6F', picker=self.on_second_line_pick)
+                self.second_line_position = event.xdata
+                self.second_click = False
+                self.canvas.draw()
+
+    def on_first_line_pick(self, artist, mouseevent):
+        if (mouseevent.button == mouseevent.button.RIGHT) and (self.first_line is not None):
+            artist.remove()
+            self.first_line = None
+            self.first_click = True
+            self.first_line_position = None
+            self.canvas.draw()
+            print('I am done')
+        return True, dict()
+
+    def on_second_line_pick(self, artist, mouseevent):
+        if (mouseevent.button == mouseevent.button.RIGHT) and (self.second_line is not None):
+            artist.remove()
+            self.second_line = None
+            self.second_click = True
+            self.second_line_position = None
+            self.canvas.draw()
+            print('I am done too')
+        return True, dict()
+
 
 
 def run_gui():
