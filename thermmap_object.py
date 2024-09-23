@@ -10,7 +10,9 @@ class ThermMap:
         self.directory = file_directory
 
     def get_data(self):
+        self.data = self.file[self.name][f'data_{self.name}']
         return self.file[self.name][f'data_{self.name}']
 
     def get_temperatures(self):
+        self.temperatures = self.file[self.name][f'temperatures_{self.name}']
         return self.file[self.name][f'temperatures_{self.name}']
