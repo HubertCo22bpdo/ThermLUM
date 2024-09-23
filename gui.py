@@ -126,11 +126,17 @@ class MainWindow(QMainWindow):
 
     def on_click(self, event):
         if event.button == event.button.LEFT:
+            if event.xdata % self.resolution_of_x_data == 0.0:
+                value = event.xdata
+            elif event.xdata % self.resolution_of_x_data >= 0.5*self.resolution_of_x_data:
+                value = ((event.xdata // self.resolution_of_x_data) * self.resolution_of_x_data) + self.resolution_of_x_data
+            else:
+                value = (event.xdata // self.resolution_of_x_data) * self.resolution_of_x_data
             if self.first_click:
-                self.first_value_widget.setValue(event.xdata)
+                self.first_value_widget.setValue(value)
                 self.second_click = True
             elif self.second_click:
-                self.second_value_widget.setValue(event.xdata)
+                self.second_value_widget.setValue(value)
                 self.second_click = False
 
 
