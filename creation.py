@@ -4,10 +4,8 @@ import numpy as np
 from os import path
 def new(file_path, hdf_name):
     file_directory, file_name = path.split(file_path)
-    print(file_path)
     with open(file_path, "r") as file:
         lines_list = file.readlines()
-        print(lines_list)
     for index, line in enumerate(lines_list):
         if 'Labels' in line:
             start_description_index = index

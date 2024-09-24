@@ -1,1 +1,17 @@
-{"recently_opened_folder": "~", "default_file_type": "Text Files (*.txt)"}
+{
+"recently_opened_folder": "~",
+"default_file_type": "Text Files (*.txt)",
+"plot_colormap": [
+"#E5EEFF",
+"#99B1D7",
+"#294D7F",
+"#287593",
+"#759387",
+"#BFA96D",
+"#B7925E",
+"#B37953",
+"#A64C4C",
+"#9E214B",
+"#460F26"
+]
+}

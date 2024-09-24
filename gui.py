@@ -29,11 +29,21 @@ with open('./settings.json', 'r') as settings_json:
 
 
 class MplCanvas(FigureCanvasQTAgg):
-    def __init__(self, parent=None, width=5, height=4, dpi=150):
+    def __init__(self, parent=None, width=5, height=4, dpi=120):
         fig = Figure(figsize=(width, height), dpi=dpi)
-        fig.subplots_adjust(bottom=0.15)
+        fig.subplots_adjust(bottom=0.15, left=0.15)
         self.axes = fig.add_subplot(111)
         super(MplCanvas, self).__init__(fig)
+
+class OutMplCavas(FigureCanvasQTAgg):
+    def __init__(self, parent=None, width=5, height=4, dpi=120):
+        fig = Figure(figsize=(width, height), dpi=dpi)
+        fig.subplots_adjust(bottom=0.15, left=0.15)
+        self.parameter_axes = fig.add_subplot(3, 1, (1, 2))
+        self.sensitivity_axes = self.parameter_axes.twinx()
+        self.error_axes = fig.add_subplot(3, 1, 3)
+        super(OutMplCavas, self).__init__(fig)
+
 
 
 class MainWindow(QMainWindow):
@@ -42,7 +52,7 @@ class MainWindow(QMainWindow):
 
         start_path = path.expanduser(settings['recently_opened_folder'])
 
-        filters = 'CSV Files (*.csv);;Text Files (*.txt)'
+        filters = 'CSV Files (*.csv);;Text Files (*.txt);;Data Files (*.dat)'
         selectedFilter = settings['default_file_type']
 
         file_path, filter = QFileDialog.getOpenFileName(
@@ -51,7 +61,7 @@ class MainWindow(QMainWindow):
 
         settings['recently_opened_folder'] = path.split(file_path)[0]
         with open('./settings.json', 'r+') as settings_json:
-            settings_json.write(json.dumps(settings))
+            settings_json.write(json.dumps(settings, indent=0))
 
         self.thermmap = new(file_path, path.split(file_path)[1][:-4])
         self.thermmap.get_data()
@@ -63,26 +73,16 @@ class MainWindow(QMainWindow):
         self.normalized_canvas = MplCanvas(self)
         self.normalized_plot_toolbar = NavigationToolbar(self.normalized_canvas, self)
 
-        list_of_colors = [
-            "#E5EEFF",
-            "#99B1D7",
-            "#294D7F",
-            "#287593",
-            "#759387",
-            "#BFA96D",
-            "#B7925E",
-            "#B37953",
-            "#A64C4C",
-            "#9E214B",
-            "#460F26"
-        ]
+        list_of_colors = settings["plot_colormap"]
 
         self.canvas.axes = luminescence_dt(
             self.thermmap.data,
             self.thermmap.temperatures,
             self.canvas.axes,
-            colormap=mpl.colors.LinearSegmentedColormap.from_list(name='', colors=list_of_colors,
-                                                                  N=len(self.thermmap.temperatures))
+            colormap=mpl.colors.LinearSegmentedColormap.from_list(
+                name='',
+                colors=list_of_colors,
+                N=len(self.thermmap.temperatures))
         )
 
         self.first_click = True
@@ -143,6 +143,7 @@ class MainWindow(QMainWindow):
         layout_wavelengths_chooser.addRow(QLabel('Denominator: '), self.second_value_widget)
         layout_ribbon.addLayout(layout_wavelengths_chooser)
 
+
         layout_normalization_widgets = QGridLayout()
         self.normalization_value_widget = QDoubleSpinBox(
             minimum=self.thermmap.data[0, 0],
@@ -159,6 +160,10 @@ class MainWindow(QMainWindow):
         self.normalization_button.clicked.connect(self.on_normalization_button_clicked)
         layout_normalization_widgets.addWidget(self.normalization_button, 1, 0, 1, 2)
         layout_ribbon.addLayout(layout_normalization_widgets)
+
+        self.start_fitting_button = QPushButton('Start Fitting')
+        self.start_fitting_button.clicked.connect(self.start_fitting)
+        layout_ribbon.addWidget(self.start_fitting_button)
 
         layout_main.addLayout(layout_ribbon)
 
@@ -309,19 +314,7 @@ class MainWindow(QMainWindow):
         if self.normalization_position is not None:
             if checked:
                 self.normalization_button.setText('Denormalize')
-                list_of_colors = [
-                    "#E5EEFF",
-                    "#99B1D7",
-                    "#294D7F",
-                    "#287593",
-                    "#759387",
-                    "#BFA96D",
-                    "#B7925E",
-                    "#B37953",
-                    "#A64C4C",
-                    "#9E214B",
-                    "#460F26"
-                ]
+                list_of_colors = settings["plot_colormap"]
                 self.normalized_canvas.axes.cla()
                 self.normalized_canvas.axes = luminescence_dt(
                     self.thermmap.normalize(self.normalization_position),
@@ -368,6 +361,9 @@ class MainWindow(QMainWindow):
                 self.layout_plots.setCurrentIndex(0)
         else:
             self.normalization_button.setChecked(False)
+
+    def start_fitting(self):
+        pass
 
 
 def run_gui():
