@@ -31,6 +31,7 @@ with open('./settings.json', 'r') as settings_json:
 class MplCanvas(FigureCanvasQTAgg):
     def __init__(self, parent=None, width=5, height=4, dpi=150):
         fig = Figure(figsize=(width, height), dpi=dpi)
+        fig.subplots_adjust(bottom=0.15)
         self.axes = fig.add_subplot(111)
         super(MplCanvas, self).__init__(fig)
 
@@ -88,6 +89,9 @@ class MainWindow(QMainWindow):
         self.second_click = False
         self.first_line = None
         self.second_line = None
+        self.normalized_first_line = None
+        self.normalized_second_line = None
+        self.normalized_normalization_line = None
         self.first_line_position = None
         self.second_line_position = None
         self.normalization_position = None
@@ -96,6 +100,8 @@ class MainWindow(QMainWindow):
 
         self.cid1 = self.canvas.mpl_connect('button_press_event', self.on_click)
         self.cid2 = self.canvas.mpl_connect('pick_event', self.on_pick)
+        self.cid3 = self.normalized_canvas.mpl_connect('button_press_event', self.on_click)
+        self.cid2 = self.normalized_canvas.mpl_connect('pick_event', self.on_pick)
 
         layout_main = QHBoxLayout()
         self.layout_plots = QStackedLayout()
@@ -181,18 +187,28 @@ class MainWindow(QMainWindow):
             return
         artist = event.artist
         mouse_event = event.mouseevent
-        if (mouse_event.button == mouse_event.button.RIGHT) and (artist == self.first_line):
-            artist.remove()
-            self.first_line = None
+        if (mouse_event.button == mouse_event.button.RIGHT) and (artist == self.first_line or artist == self.normalized_first_line):
+            if self.normalized_first_line is not None:
+                self.normalized_first_line.remove()
+                self.normalized_first_line = None
+            if self.first_line is not None:
+                self.first_line.remove()
+                self.first_line = None
             self.first_click = True
             self.first_line_position = None
             self.canvas.draw()
-        elif (mouse_event.button == mouse_event.button.RIGHT) and (artist == self.second_line):
-            artist.remove()
-            self.second_line = None
+            self.normalized_canvas.draw()
+        elif (mouse_event.button == mouse_event.button.RIGHT) and (artist == self.second_line or artist == self.normalized_second_line):
+            if self.normalized_second_line is not None:
+                self.normalized_second_line.remove()
+                self.normalized_second_line = None
+            if self.second_line is not None:
+                self.second_line.remove()
+                self.second_line = None
             self.second_click = True
             self.second_line_position = None
             self.canvas.draw()
+            self.normalized_canvas.draw()
 
     def on_first_value_changed(self, value):
         new_value = quantization_to_resolution(value, self.resolution_of_x_data)
@@ -201,7 +217,18 @@ class MainWindow(QMainWindow):
             return
         if self.first_line is not None:
             self.first_line.remove()
+        if self.normalized_first_line is not None:
+            self.normalized_first_line.remove()
         self.first_line = self.canvas.axes.axvline(
+            value,
+            ymin=0.02,
+            ymax=0.9,
+            linestyle='--',
+            color='#6D597A',
+            picker=True,
+            zorder=0
+        )
+        self.normalized_first_line = self.normalized_canvas.axes.axvline(
             value,
             ymin=0.02,
             ymax=0.9,
@@ -213,6 +240,7 @@ class MainWindow(QMainWindow):
         self.first_line_position = value
         self.first_click = False
         self.canvas.draw()
+        self.normalized_canvas.draw()
 
     def on_second_value_changed(self, value):
         new_value = quantization_to_resolution(value, self.resolution_of_x_data)
@@ -221,7 +249,18 @@ class MainWindow(QMainWindow):
             return
         if self.second_line is not None:
             self.second_line.remove()
+        if self.normalized_second_line is not None:
+            self.normalized_second_line.remove()
         self.second_line = self.canvas.axes.axvline(
+            value,
+            ymin=0.02,
+            ymax=0.9,
+            linestyle='--',
+            color='#E56B6F',
+            picker=True,
+            zorder=0
+        )
+        self.normalized_second_line = self.normalized_canvas.axes.axvline(
             value,
             ymin=0.02,
             ymax=0.9,
@@ -233,6 +272,7 @@ class MainWindow(QMainWindow):
         self.second_line_position = value
         self.second_click = False
         self.canvas.draw()
+        self.normalized_canvas.draw()
 
     def on_normalization_value_changed(self, value):
         new_value = quantization_to_resolution(value, self.resolution_of_x_data)
@@ -241,7 +281,18 @@ class MainWindow(QMainWindow):
             return
         if self.normalization_line is not None:
             self.normalization_line.remove()
+        if self.normalized_normalization_line is not None:
+            self.normalized_normalization_line.remove()
         self.normalization_line = self.canvas.axes.axvline(
+            value,
+            ymin=0,
+            ymax=1,
+            linestyle='-',
+            color='#ffd656',
+            picker=True,
+            zorder=0
+        )
+        self.normalized_normalization_line = self.normalized_canvas.axes.axvline(
             value,
             ymin=0,
             ymax=1,
@@ -252,6 +303,7 @@ class MainWindow(QMainWindow):
         )
         self.normalization_position = value
         self.canvas.draw()
+        self.normalized_canvas.draw()
 
     def on_normalization_button_clicked(self, checked):
         if self.normalization_position is not None:
@@ -280,6 +332,35 @@ class MainWindow(QMainWindow):
                         colors=list_of_colors,
                         N=len(self.thermmap.temperatures)
                     ))
+                if self.first_line_position is not None:
+                    self.normalized_first_line = self.normalized_canvas.axes.axvline(
+                        self.first_line_position,
+                        ymin=0.02,
+                        ymax=0.9,
+                        linestyle='--',
+                        color='#6D597A',
+                        picker=True,
+                        zorder=0
+                    )
+                if self.second_line_position is not None:
+                    self.normalized_second_line = self.normalized_canvas.axes.axvline(
+                        self.second_line_position,
+                        ymin=0.02,
+                        ymax=0.9,
+                        linestyle='--',
+                        color='#E56B6F',
+                        picker=True,
+                        zorder=0
+                    )
+                self.normalized_normalization_line = self.normalized_canvas.axes.axvline(
+                    self.normalization_position,
+                    ymin=0,
+                    ymax=1,
+                    linestyle='-',
+                    color='#ffd656',
+                    picker=True,
+                    zorder=0
+                )
                 self.normalized_canvas.draw()
                 self.layout_plots.setCurrentIndex(1)
             else:
@@ -292,6 +373,7 @@ class MainWindow(QMainWindow):
 def run_gui():
     # QApp
     app = QApplication(argv)
+    app.setApplicationName('ThermLUM')
     # QWidget (MainWindow)
     window = MainWindow()
     window.show()
