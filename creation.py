@@ -31,6 +31,7 @@ def new(file_path, hdf_name):
         data_file.write(data_contents)
 
     data_df = pd.read_csv(data_file.name, sep=',', header=None)
+    data_df = data_df.iloc[:, :-1] # index -1 removes nan column previously containing new line symbols
 
     hdf_file_path = path.join(file_directory, hdf_name+'.hdf5')
     hdf_file = h5py.File(hdf_file_path, 'w')

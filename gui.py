@@ -3,8 +3,9 @@ from sys import argv
 import json
 
 from PyQt6.QtWidgets import QCheckBox, QDialog, QSpinBox, QDialogButtonBox, QLabel, QMessageBox, QWidget, QVBoxLayout, \
-    QApplication, QMainWindow, QFileDialog, QHBoxLayout, QGridLayout, QAbstractSpinBox, QComboBox, QTabWidget, QFormLayout, \
-    QColorDialog, QFrame, QDoubleSpinBox, QPushButton
+    QApplication, QMainWindow, QFileDialog, QHBoxLayout, QGridLayout, QAbstractSpinBox, QComboBox, QTabWidget, \
+    QFormLayout, \
+    QColorDialog, QFrame, QDoubleSpinBox, QPushButton, QStackedLayout
 from PyQt6.QtGui import QAction, QCloseEvent, QIcon, QFont, QColor
 from PyQt6.QtCore import QSize, Qt, pyqtSignal
 
@@ -19,6 +20,7 @@ from matplotlib.pyplot import close
 
 from creation import new
 from utilities import quantization_to_resolution
+from plotting import luminescence_dt
 
 mpl.use("QtAgg")
 
@@ -57,6 +59,9 @@ class MainWindow(QMainWindow):
         self.canvas = MplCanvas(self)
         self.plot_toolbar = NavigationToolbar(self.canvas, self)
 
+        self.normalized_canvas = MplCanvas(self)
+        self.normalized_plot_toolbar = NavigationToolbar(self.normalized_canvas, self)
+
         list_of_colors = [
             "#E5EEFF",
             "#99B1D7",
@@ -70,12 +75,13 @@ class MainWindow(QMainWindow):
             "#9E214B",
             "#460F26"
         ]
-        from plotting import luminescence_dt
+
         self.canvas.axes = luminescence_dt(
             self.thermmap.data,
             self.thermmap.temperatures,
             self.canvas.axes,
-            colormap=mpl.colors.LinearSegmentedColormap.from_list(name='', colors=list_of_colors, N=len(self.thermmap.temperatures))
+            colormap=mpl.colors.LinearSegmentedColormap.from_list(name='', colors=list_of_colors,
+                                                                  N=len(self.thermmap.temperatures))
         )
 
         self.first_click = True
@@ -86,15 +92,28 @@ class MainWindow(QMainWindow):
         self.second_line_position = None
         self.normalization_position = None
         self.normalization_line = None
-        self.cid1 = self.canvas.mpl_connect('button_press_event', self.on_click)
-        self.cid2 = self.canvas.mpl_connect('pick_event', self.on_pick)
         self.resolution_of_x_data = abs(self.thermmap.data[-1, 0] - self.thermmap.data[-2, 0])
 
+        self.cid1 = self.canvas.mpl_connect('button_press_event', self.on_click)
+        self.cid2 = self.canvas.mpl_connect('pick_event', self.on_pick)
+
         layout_main = QHBoxLayout()
+        self.layout_plots = QStackedLayout()
         layout_plot = QVBoxLayout()
         layout_plot.addWidget(self.plot_toolbar)
         layout_plot.addWidget(self.canvas)
-        layout_main.addLayout(layout_plot)
+
+        layout_normalized_plot = QVBoxLayout()
+        layout_normalized_plot.addWidget(self.normalized_plot_toolbar)
+        layout_normalized_plot.addWidget(self.normalized_canvas)
+
+        container1 = QWidget()
+        container1.setLayout(layout_plot)
+        container2 = QWidget()
+        container2.setLayout(layout_normalized_plot)
+        self.layout_plots.addWidget(container1)
+        self.layout_plots.addWidget(container2)
+        layout_main.addLayout(self.layout_plots)
         layout_ribbon = QVBoxLayout()
 
         layout_wavelengths_chooser = QFormLayout()
@@ -158,6 +177,8 @@ class MainWindow(QMainWindow):
             self.normalization_value_widget.setValue(value)
 
     def on_pick(self, event):
+        if type(event.mouseevent.button) is str:
+            return
         artist = event.artist
         mouse_event = event.mouseevent
         if (mouse_event.button == mouse_event.button.RIGHT) and (artist == self.first_line):
@@ -236,20 +257,45 @@ class MainWindow(QMainWindow):
         if self.normalization_position is not None:
             if checked:
                 self.normalization_button.setText('Denormalize')
+                list_of_colors = [
+                    "#E5EEFF",
+                    "#99B1D7",
+                    "#294D7F",
+                    "#287593",
+                    "#759387",
+                    "#BFA96D",
+                    "#B7925E",
+                    "#B37953",
+                    "#A64C4C",
+                    "#9E214B",
+                    "#460F26"
+                ]
+                self.normalized_canvas.axes.cla()
+                self.normalized_canvas.axes = luminescence_dt(
+                    self.thermmap.normalize(self.normalization_position),
+                    self.thermmap.temperatures,
+                    self.normalized_canvas.axes,
+                    colormap=mpl.colors.LinearSegmentedColormap.from_list(
+                        name='',
+                        colors=list_of_colors,
+                        N=len(self.thermmap.temperatures)
+                    ))
+                self.normalized_canvas.draw()
+                self.layout_plots.setCurrentIndex(1)
             else:
                 self.normalization_button.setText('Normalize')
+                self.layout_plots.setCurrentIndex(0)
         else:
             self.normalization_button.setChecked(False)
 
 
-
 def run_gui():
-        # QApp
-        app = QApplication(argv)
-        # QWidget (MainWindow)
-        window = MainWindow()
-        window.show()
-        app.exec()
+    # QApp
+    app = QApplication(argv)
+    # QWidget (MainWindow)
+    window = MainWindow()
+    window.show()
+    app.exec()
 
 
 run_gui()
