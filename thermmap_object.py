@@ -13,6 +13,7 @@ class ThermMap:
 
     def get_data(self):
         self.data = self.file[self.name][f'data_{self.name}']
+        self.x_data = self.data[:, 0]
         return self.data
 
     def get_temperatures(self):
@@ -20,14 +21,8 @@ class ThermMap:
         return self.temperatures
 
     def normalize(self, normalization_value, save=False):
-        initial_data = self.get_data()
-        x_axis = initial_data[:, 0]
-        normalization_row = None
-        for index, value in enumerate(x_axis):
-            if value == normalization_value:
-                normalization_row = initial_data[index, 1:]
-                break
-        new_data = np.vstack((x_axis, (initial_data[:, 1:] / normalization_row).T)).T
+        normalization_row = self.get_row_of_ydata(normalization_value)
+        new_data = np.vstack((self.x_data, (self.data[:, 1:] / normalization_row).T)).T
         if save:
             try:
                 self.file[self.name][f'data_{self.name}_normalized_to_{normalization_value}'] = new_data
@@ -35,5 +30,9 @@ class ThermMap:
                 print(e)
         return new_data
 
-
-
+    def get_row_of_ydata(self, x_value):
+        self.get_data()
+        for index, value in enumerate(self.x_data):
+            if value == x_value:
+                row = self.data[index, 1:]
+                return row

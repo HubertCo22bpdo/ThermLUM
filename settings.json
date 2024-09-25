@@ -13,5 +13,8 @@
 "#A64C4C",
 "#9E214B",
 "#460F26"
-]
+],
+"plot_width": 5.5,
+"plot_height": 5,
+"plot_dpi": 110
 }

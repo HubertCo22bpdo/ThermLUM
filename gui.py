@@ -5,7 +5,7 @@ import json
 from PyQt6.QtWidgets import QCheckBox, QDialog, QSpinBox, QDialogButtonBox, QLabel, QMessageBox, QWidget, QVBoxLayout, \
     QApplication, QMainWindow, QFileDialog, QHBoxLayout, QGridLayout, QAbstractSpinBox, QComboBox, QTabWidget, \
     QFormLayout, \
-    QColorDialog, QFrame, QDoubleSpinBox, QPushButton, QStackedLayout
+    QColorDialog, QFrame, QDoubleSpinBox, QPushButton, QStackedLayout, QSizePolicy
 from PyQt6.QtGui import QAction, QCloseEvent, QIcon, QFont, QColor
 from PyQt6.QtCore import QSize, Qt, pyqtSignal
 
@@ -29,20 +29,21 @@ with open('./settings.json', 'r') as settings_json:
 
 
 class MplCanvas(FigureCanvasQTAgg):
-    def __init__(self, parent=None, width=5, height=4, dpi=120):
+    def __init__(self, parent=None, width=settings['plot_width'], height=settings['plot_height'], dpi=settings['plot_dpi']):
         fig = Figure(figsize=(width, height), dpi=dpi)
         fig.subplots_adjust(bottom=0.15, left=0.15)
         self.axes = fig.add_subplot(111)
         super(MplCanvas, self).__init__(fig)
 
-class OutMplCavas(FigureCanvasQTAgg):
-    def __init__(self, parent=None, width=5, height=4, dpi=120):
+class OutMplCanvas(FigureCanvasQTAgg):
+    def __init__(self, parent=None, width=settings['plot_width'], height=settings['plot_height'], dpi=settings['plot_dpi']):
         fig = Figure(figsize=(width, height), dpi=dpi)
         fig.subplots_adjust(bottom=0.15, left=0.15)
+        fig.tight_layout()
         self.parameter_axes = fig.add_subplot(3, 1, (1, 2))
         self.sensitivity_axes = self.parameter_axes.twinx()
         self.error_axes = fig.add_subplot(3, 1, 3)
-        super(OutMplCavas, self).__init__(fig)
+        super(OutMplCanvas, self).__init__(fig)
 
 
 
@@ -68,10 +69,14 @@ class MainWindow(QMainWindow):
         self.thermmap.get_temperatures()
 
         self.canvas = MplCanvas(self)
+        self.canvas.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum)
         self.plot_toolbar = NavigationToolbar(self.canvas, self)
 
         self.normalized_canvas = MplCanvas(self)
         self.normalized_plot_toolbar = NavigationToolbar(self.normalized_canvas, self)
+
+        self.fitting_canvas = None
+        self.fitting_toolbar = None
 
         list_of_colors = settings["plot_colormap"]
 
@@ -103,7 +108,7 @@ class MainWindow(QMainWindow):
         self.cid3 = self.normalized_canvas.mpl_connect('button_press_event', self.on_click)
         self.cid2 = self.normalized_canvas.mpl_connect('pick_event', self.on_pick)
 
-        layout_main = QHBoxLayout()
+        self.layout_main = QHBoxLayout()
         self.layout_plots = QStackedLayout()
         layout_plot = QVBoxLayout()
         layout_plot.addWidget(self.plot_toolbar)
@@ -119,7 +124,7 @@ class MainWindow(QMainWindow):
         container2.setLayout(layout_normalized_plot)
         self.layout_plots.addWidget(container1)
         self.layout_plots.addWidget(container2)
-        layout_main.addLayout(self.layout_plots)
+        self.layout_main.addLayout(self.layout_plots)
         layout_ribbon = QVBoxLayout()
 
         layout_wavelengths_chooser = QFormLayout()
@@ -143,7 +148,6 @@ class MainWindow(QMainWindow):
         layout_wavelengths_chooser.addRow(QLabel('Denominator: '), self.second_value_widget)
         layout_ribbon.addLayout(layout_wavelengths_chooser)
 
-
         layout_normalization_widgets = QGridLayout()
         self.normalization_value_widget = QDoubleSpinBox(
             minimum=self.thermmap.data[0, 0],
@@ -165,12 +169,13 @@ class MainWindow(QMainWindow):
         self.start_fitting_button.clicked.connect(self.start_fitting)
         layout_ribbon.addWidget(self.start_fitting_button)
 
-        layout_main.addLayout(layout_ribbon)
+        self.layout_main.addLayout(layout_ribbon)
 
         widget = QWidget()
-        widget.setLayout(layout_main)
+        widget.setLayout(self.layout_main)
         self.setCentralWidget(widget)
         self.canvas.draw()
+        self.move(0, 0)
 
     def on_click(self, event):
         if type(event.button) is str:
@@ -363,6 +368,28 @@ class MainWindow(QMainWindow):
             self.normalization_button.setChecked(False)
 
     def start_fitting(self):
+        if self.fitting_canvas is None:
+            self.fitting_canvas = OutMplCanvas()
+            self.fitting_canvas.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum)
+            self.fitting_toolbar = NavigationToolbar(self.fitting_canvas, self)
+            layout_fitting = QVBoxLayout()
+            layout_fitting.addWidget(self.fitting_toolbar)
+            layout_fitting.addWidget(self.fitting_canvas)
+            self.layout_main.addLayout(layout_fitting)
+
+        self.thermometric_parameter = self.thermmap.get_row_of_ydata(self.first_line_position) / self.thermmap.get_row_of_ydata(self.second_line_position)
+        self.fitting_canvas.parameter_axes.cla()
+        self.fitting_canvas.parameter_axes.scatter(
+            self.thermmap.temperatures,
+            self.thermometric_parameter,
+            color='#6D597A',
+            marker='o',
+            facecolors='none'
+        )
+        self.fitting_canvas.parameter_axes.set_ylabel('Intensity ratio', color='#6D597A')
+        self.fitting_canvas.parameter_axes.tick_params(axis='y', labelcolor='#6D597A')
+        self.fitting_canvas.draw()
+        #TODO: I will use scipy.optimisation.function_fit here
         pass
 
 
