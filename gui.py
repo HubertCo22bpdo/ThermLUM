@@ -1,6 +1,7 @@
 from os import path
 from sys import argv
 import json
+from inspect import signature
 
 from PyQt6.QtWidgets import QCheckBox, QDialog, QSpinBox, QDialogButtonBox, QLabel, QMessageBox, QWidget, QVBoxLayout, \
     QApplication, QMainWindow, QFileDialog, QHBoxLayout, QGridLayout, QAbstractSpinBox, QComboBox, QTabWidget, \
@@ -21,6 +22,7 @@ from matplotlib.pyplot import close
 from creation import new
 from utilities import quantization_to_resolution
 from plotting import luminescence_dt
+from fitting_functions import dict_of_fitting_functions
 
 mpl.use("QtAgg")
 
@@ -29,14 +31,17 @@ with open('./settings.json', 'r') as settings_json:
 
 
 class MplCanvas(FigureCanvasQTAgg):
-    def __init__(self, parent=None, width=settings['plot_width'], height=settings['plot_height'], dpi=settings['plot_dpi']):
+    def __init__(self, parent=None, width=settings['plot_width'], height=settings['plot_height'],
+                 dpi=settings['plot_dpi']):
         fig = Figure(figsize=(width, height), dpi=dpi)
         fig.subplots_adjust(bottom=0.15, left=0.15)
         self.axes = fig.add_subplot(111)
         super(MplCanvas, self).__init__(fig)
 
+
 class OutMplCanvas(FigureCanvasQTAgg):
-    def __init__(self, parent=None, width=settings['plot_width'], height=settings['plot_height'], dpi=settings['plot_dpi']):
+    def __init__(self, parent=None, width=settings['plot_width'], height=settings['plot_height'],
+                 dpi=settings['plot_dpi']):
         fig = Figure(figsize=(width, height), dpi=dpi)
         fig.subplots_adjust(bottom=0.15, left=0.15)
         fig.tight_layout()
@@ -45,6 +50,17 @@ class OutMplCanvas(FigureCanvasQTAgg):
         self.error_axes = fig.add_subplot(3, 1, 3)
         super(OutMplCanvas, self).__init__(fig)
 
+
+class NumberedDoubleSpinBox(QDoubleSpinBox):
+    def __init__(self, *args, index, **kwargs):
+        self.index = index
+        super().__init__(*args, **kwargs)
+
+
+class NumberedPushButton(QPushButton):
+    def __init__(self, *args, index, **kwargs):
+        self.index = index
+        super().__init__(*args, **kwargs)
 
 
 class MainWindow(QMainWindow):
@@ -169,6 +185,40 @@ class MainWindow(QMainWindow):
         self.start_fitting_button.clicked.connect(self.start_fitting)
         layout_ribbon.addWidget(self.start_fitting_button)
 
+        self.fitting_functions_widget = QComboBox()
+        self.fitting_functions_layout = QStackedLayout()
+        fitting_function_index = 0
+        fitting_layouts = []
+        fitting_containers = []
+        fitting_buttons = []
+        fitting_boxes = []
+        for name, function in dict_of_fitting_functions.items():
+            self.fitting_functions_widget.addItem(name)
+            temporary_layout = QGridLayout()
+            temporary_container = QWidget()
+            fitting_buttons.append([])
+            fitting_boxes.append([])
+            for index, argument in enumerate(signature(function).parameters):
+                temporary_layout.addWidget(QLabel(f'{argument}'), index, 0)
+                temporary_spinbox = NumberedDoubleSpinBox(index=index)
+                fitting_boxes[fitting_function_index].append(temporary_spinbox)
+                temporary_layout.addWidget(fitting_boxes[fitting_function_index][index], index, 1)
+                temporary_button = NumberedPushButton('Block', index=index)
+                temporary_button.setCheckable(True)
+                fitting_buttons[fitting_function_index].append(temporary_button)
+                temporary_layout.addWidget(fitting_buttons[fitting_function_index][index], index, 2)
+
+
+            temporary_container.setLayout(temporary_layout)
+            fitting_layouts.append(temporary_layout)
+            fitting_containers.append(temporary_container)
+            self.fitting_functions_layout.addWidget(fitting_containers[fitting_function_index])
+            fitting_function_index += 1
+
+        # self.fitting_functions_widget.currentIndexChanged.connect(self.on_fitting_functions_changed)
+        layout_ribbon.addWidget(self.fitting_functions_widget)
+        layout_ribbon.addLayout(self.fitting_functions_layout)
+
         self.layout_main.addLayout(layout_ribbon)
 
         widget = QWidget()
@@ -197,7 +247,8 @@ class MainWindow(QMainWindow):
             return
         artist = event.artist
         mouse_event = event.mouseevent
-        if (mouse_event.button == mouse_event.button.RIGHT) and (artist == self.first_line or artist == self.normalized_first_line):
+        if (mouse_event.button == mouse_event.button.RIGHT) and (
+                artist == self.first_line or artist == self.normalized_first_line):
             if self.normalized_first_line is not None:
                 self.normalized_first_line.remove()
                 self.normalized_first_line = None
@@ -208,7 +259,8 @@ class MainWindow(QMainWindow):
             self.first_line_position = None
             self.canvas.draw()
             self.normalized_canvas.draw()
-        elif (mouse_event.button == mouse_event.button.RIGHT) and (artist == self.second_line or artist == self.normalized_second_line):
+        elif (mouse_event.button == mouse_event.button.RIGHT) and (
+                artist == self.second_line or artist == self.normalized_second_line):
             if self.normalized_second_line is not None:
                 self.normalized_second_line.remove()
                 self.normalized_second_line = None
@@ -377,7 +429,8 @@ class MainWindow(QMainWindow):
             layout_fitting.addWidget(self.fitting_canvas)
             self.layout_main.addLayout(layout_fitting)
 
-        self.thermometric_parameter = self.thermmap.get_row_of_ydata(self.first_line_position) / self.thermmap.get_row_of_ydata(self.second_line_position)
+        self.thermometric_parameter = self.thermmap.get_row_of_ydata(
+            self.first_line_position) / self.thermmap.get_row_of_ydata(self.second_line_position)
         self.fitting_canvas.parameter_axes.cla()
         self.fitting_canvas.parameter_axes.scatter(
             self.thermmap.temperatures,
@@ -389,7 +442,7 @@ class MainWindow(QMainWindow):
         self.fitting_canvas.parameter_axes.set_ylabel('Intensity ratio', color='#6D597A')
         self.fitting_canvas.parameter_axes.tick_params(axis='y', labelcolor='#6D597A')
         self.fitting_canvas.draw()
-        #TODO: I will use scipy.optimisation.function_fit here
+        # TODO: I will use scipy.optimisation.function_fit here
         pass
 
 
