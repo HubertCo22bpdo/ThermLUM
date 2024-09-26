@@ -2,6 +2,7 @@ from os import path
 from sys import argv
 import json
 from inspect import signature
+from functools import partial
 
 from PyQt6.QtWidgets import QCheckBox, QDialog, QSpinBox, QDialogButtonBox, QLabel, QMessageBox, QWidget, QVBoxLayout, \
     QApplication, QMainWindow, QFileDialog, QHBoxLayout, QGridLayout, QAbstractSpinBox, QComboBox, QTabWidget, \
@@ -22,7 +23,7 @@ from matplotlib.pyplot import close
 from creation import new
 from utilities import quantization_to_resolution
 from plotting import luminescence_dt
-from fitting_functions import dict_of_fitting_functions
+from fitting_functions import dict_of_fitting_functions, dict_of_fitting_limits
 
 mpl.use("QtAgg")
 
@@ -181,9 +182,9 @@ class MainWindow(QMainWindow):
         layout_normalization_widgets.addWidget(self.normalization_button, 1, 0, 1, 2)
         layout_ribbon.addLayout(layout_normalization_widgets)
 
-        self.start_fitting_button = QPushButton('Start Fitting')
-        self.start_fitting_button.clicked.connect(self.start_fitting)
-        layout_ribbon.addWidget(self.start_fitting_button)
+        self.create_thermometric_parameter_button = QPushButton('Create thermometric parameter')
+        self.create_thermometric_parameter_button.clicked.connect(self.create_thermometric_parameter)
+        layout_ribbon.addWidget(self.create_thermometric_parameter_button)
 
         self.fitting_functions_widget = QComboBox()
         self.fitting_functions_layout = QStackedLayout()
@@ -192,20 +193,35 @@ class MainWindow(QMainWindow):
         fitting_containers = []
         fitting_buttons = []
         fitting_boxes = []
+        self.blocked_parameters = []
+        self.bounds_on_parameters = []
+        self.initial_parameters = []
         for name, function in dict_of_fitting_functions.items():
+            self.bounds_on_parameters.append(dict_of_fitting_limits[name])
             self.fitting_functions_widget.addItem(name)
             temporary_layout = QGridLayout()
             temporary_container = QWidget()
             fitting_buttons.append([])
             fitting_boxes.append([])
+            self.blocked_parameters.append([])
+            self.initial_parameters.append([])
             for index, argument in enumerate(signature(function).parameters):
                 temporary_layout.addWidget(QLabel(f'{argument}'), index, 0)
+                self.blocked_parameters[fitting_function_index].append(False)
+                self.initial_parameters[fitting_function_index].append(None)
                 temporary_spinbox = NumberedDoubleSpinBox(index=index)
+                temporary_spinbox.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+                temporary_spinbox.setKeyboardTracking(False)
+                temporary_spinbox.setMinimumWidth(80)
+                temporary_spinbox.setMaximum(1e18)
+                temporary_spinbox.setDecimals(18)
                 fitting_boxes[fitting_function_index].append(temporary_spinbox)
+                fitting_boxes[fitting_function_index][index].valueChanged.connect(partial(self.on_set_starting_parameter, box=fitting_boxes[fitting_function_index][index], index=index ))
                 temporary_layout.addWidget(fitting_boxes[fitting_function_index][index], index, 1)
                 temporary_button = NumberedPushButton('Block', index=index)
                 temporary_button.setCheckable(True)
                 fitting_buttons[fitting_function_index].append(temporary_button)
+                fitting_buttons[fitting_function_index][index].clicked.connect(partial(self.on_block_parameter, button=fitting_buttons[fitting_function_index][index], index=index))
                 temporary_layout.addWidget(fitting_buttons[fitting_function_index][index], index, 2)
 
 
@@ -215,7 +231,7 @@ class MainWindow(QMainWindow):
             self.fitting_functions_layout.addWidget(fitting_containers[fitting_function_index])
             fitting_function_index += 1
 
-        # self.fitting_functions_widget.currentIndexChanged.connect(self.on_fitting_functions_changed)
+        self.fitting_functions_widget.currentIndexChanged.connect(self.on_fitting_function_changed)
         layout_ribbon.addWidget(self.fitting_functions_widget)
         layout_ribbon.addLayout(self.fitting_functions_layout)
 
@@ -419,7 +435,9 @@ class MainWindow(QMainWindow):
         else:
             self.normalization_button.setChecked(False)
 
-    def start_fitting(self):
+    def create_thermometric_parameter(self):
+        if self.first_line_position is None or self.second_line_position is None:
+            return
         if self.fitting_canvas is None:
             self.fitting_canvas = OutMplCanvas()
             self.fitting_canvas.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum)
@@ -444,6 +462,16 @@ class MainWindow(QMainWindow):
         self.fitting_canvas.draw()
         # TODO: I will use scipy.optimisation.function_fit here
         pass
+
+    def on_fitting_function_changed(self, index):
+        self.fitting_functions_layout.setCurrentIndex(index)
+
+    def on_set_starting_parameter(self, box, index):
+        value = box.value()
+
+    def on_block_parameter(self, button, index):
+        checked = button.isChecked()
+        self.blocked_parameters[self.fitting_functions_layout.currentIndex()][index] = True if checked else False
 
 
 def run_gui():
