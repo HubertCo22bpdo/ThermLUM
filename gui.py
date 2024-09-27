@@ -3,6 +3,8 @@ from sys import argv
 import json
 from inspect import signature
 from functools import partial
+from scipy.optimize import curve_fit, least_squares
+from numpy import linspace
 
 from PyQt6.QtWidgets import QCheckBox, QDialog, QSpinBox, QDialogButtonBox, QLabel, QMessageBox, QWidget, QVBoxLayout, \
     QApplication, QMainWindow, QFileDialog, QHBoxLayout, QGridLayout, QAbstractSpinBox, QComboBox, QTabWidget, \
@@ -52,10 +54,23 @@ class OutMplCanvas(FigureCanvasQTAgg):
         super(OutMplCanvas, self).__init__(fig)
 
 
-class NumberedDoubleSpinBox(QDoubleSpinBox):
+class NumberedSciDSpinBox(QDoubleSpinBox):
     def __init__(self, *args, index, **kwargs):
         self.index = index
+        self.scientific_decimals = 2
         super().__init__(*args, **kwargs)
+
+    def textFromValue(self, value: float) -> str:
+        return f"{value:.{self.scientific_decimals}e}"
+
+    def valueFromText(self, text: str) -> float:
+        try:
+            return float(text)
+        except ValueError:
+            return 0.0
+
+    def setScientificDecimals(self, decimals: int) -> None:
+        self.scientific_decimals = decimals
 
 
 class NumberedPushButton(QPushButton):
@@ -186,6 +201,7 @@ class MainWindow(QMainWindow):
         self.create_thermometric_parameter_button.clicked.connect(self.create_thermometric_parameter)
         layout_ribbon.addWidget(self.create_thermometric_parameter_button)
 
+        # This block takes care of automatically creating widgets for all fitting functions and parameters
         self.fitting_functions_widget = QComboBox()
         self.fitting_functions_layout = QStackedLayout()
         fitting_function_index = 0
@@ -205,26 +221,33 @@ class MainWindow(QMainWindow):
             fitting_boxes.append([])
             self.blocked_parameters.append([])
             self.initial_parameters.append([])
+            skip_x = True
             for index, argument in enumerate(signature(function).parameters):
-                temporary_layout.addWidget(QLabel(f'{argument}'), index, 0)
+                if skip_x:
+                    skip_x = False
+                    continue
+                adjusted_index = index - 1
+                temporary_layout.addWidget(QLabel(f'{argument}'), adjusted_index, 0)
                 self.blocked_parameters[fitting_function_index].append(False)
                 self.initial_parameters[fitting_function_index].append(None)
-                temporary_spinbox = NumberedDoubleSpinBox(index=index)
+                temporary_spinbox = NumberedSciDSpinBox(index=adjusted_index)
                 temporary_spinbox.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
                 temporary_spinbox.setKeyboardTracking(False)
                 temporary_spinbox.setMinimumWidth(80)
                 temporary_spinbox.setMaximum(1e18)
                 temporary_spinbox.setDecimals(18)
                 fitting_boxes[fitting_function_index].append(temporary_spinbox)
-                fitting_boxes[fitting_function_index][index].valueChanged.connect(partial(self.on_set_starting_parameter, box=fitting_boxes[fitting_function_index][index], index=index ))
-                temporary_layout.addWidget(fitting_boxes[fitting_function_index][index], index, 1)
-                temporary_button = NumberedPushButton('Block', index=index)
+                fitting_boxes[fitting_function_index][adjusted_index].valueChanged.connect(
+                    partial(self.on_set_starting_parameter, box=fitting_boxes[fitting_function_index][adjusted_index],
+                            index=adjusted_index))
+                temporary_layout.addWidget(fitting_boxes[fitting_function_index][adjusted_index], adjusted_index, 1)
+                temporary_button = NumberedPushButton('Block', index=adjusted_index)
                 temporary_button.setCheckable(True)
                 fitting_buttons[fitting_function_index].append(temporary_button)
-                fitting_buttons[fitting_function_index][index].clicked.connect(partial(self.on_block_parameter, button=fitting_buttons[fitting_function_index][index], index=index))
-                temporary_layout.addWidget(fitting_buttons[fitting_function_index][index], index, 2)
-
-
+                fitting_buttons[fitting_function_index][adjusted_index].clicked.connect(
+                    partial(self.on_block_parameter, button=fitting_buttons[fitting_function_index][adjusted_index],
+                            index=adjusted_index))
+                temporary_layout.addWidget(fitting_buttons[fitting_function_index][adjusted_index], adjusted_index, 2)
             temporary_container.setLayout(temporary_layout)
             fitting_layouts.append(temporary_layout)
             fitting_containers.append(temporary_container)
@@ -234,6 +257,10 @@ class MainWindow(QMainWindow):
         self.fitting_functions_widget.currentIndexChanged.connect(self.on_fitting_function_changed)
         layout_ribbon.addWidget(self.fitting_functions_widget)
         layout_ribbon.addLayout(self.fitting_functions_layout)
+
+        self.start_fitting_button = QPushButton('Start Fitting')
+        self.start_fitting_button.clicked.connect(self.start_fitting)
+        layout_ribbon.addWidget(self.start_fitting_button)
 
         self.layout_main.addLayout(layout_ribbon)
 
@@ -468,10 +495,42 @@ class MainWindow(QMainWindow):
 
     def on_set_starting_parameter(self, box, index):
         value = box.value()
+        self.initial_parameters[self.fitting_functions_layout.currentIndex()][index] = value
 
     def on_block_parameter(self, button, index):
         checked = button.isChecked()
         self.blocked_parameters[self.fitting_functions_layout.currentIndex()][index] = True if checked else False
+        print(self.blocked_parameters)
+
+    def start_fitting(self):
+        if self.fitting_canvas is None:
+            return
+        current_index = self.fitting_functions_layout.currentIndex()
+        fitting_function = list(dict_of_fitting_functions.values())[current_index]
+        current_bounds = self.bounds_on_parameters[current_index]
+        print(current_bounds)
+        for index, block in enumerate(self.blocked_parameters[current_index]):
+            if block and self.initial_parameters[current_index][index] is not None:
+                current_bounds[0] = self.initial_parameters[current_index][index]
+                current_bounds[1] = self.initial_parameters[current_index][index] + 1e-17
+        print(fitting_function, current_bounds, self.initial_parameters[current_index], self.thermometric_parameter)
+
+        self.fitted_output_parameters, _ = curve_fit(
+            f=fitting_function,
+            xdata=self.thermmap.temperatures,
+            ydata=self.thermometric_parameter,
+            p0=self.initial_parameters[current_index],
+            bounds=current_bounds
+        )
+        print('alive')
+        fit_x = linspace(self.thermmap.temperatures[0], self.thermmap.temperatures[-1], 1000)
+        self.fitted_output_data = [fitting_function(x_value, *self.fitted_output_parameters) for x_value in fit_x]
+        self.fitting_canvas.parameter_axes.plot(
+            fit_x,
+            self.fitted_output_data,
+            color='#6D597A'
+        )
+        self.fitting_canvas.draw()
 
 
 def run_gui():
@@ -484,4 +543,5 @@ def run_gui():
     app.exec()
 
 
-run_gui()
+if __name__ == '__main__':
+    run_gui()
