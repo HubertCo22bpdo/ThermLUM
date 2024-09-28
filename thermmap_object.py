@@ -13,11 +13,11 @@ class ThermMap:
 
     def get_data(self):
         self.data = self.file[self.name][f'data_{self.name}']
-        self.x_data = self.data[:, 0]
+        self.x_data = self.data[:, 0].astype(np.float64)
         return self.data
 
     def get_temperatures(self):
-        self.temperatures = self.file[self.name][f'temperatures_{self.name}']
+        self.temperatures = self.file[self.name][f'temperatures_{self.name}'][...].astype(np.float64)
         return self.temperatures
 
     def normalize(self, normalization_value, save=False):

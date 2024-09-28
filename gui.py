@@ -478,8 +478,8 @@ class MainWindow(QMainWindow):
             self.first_line_position) / self.thermmap.get_row_of_ydata(self.second_line_position)
         self.fitting_canvas.parameter_axes.cla()
         self.fitting_canvas.parameter_axes.scatter(
-            self.thermmap.temperatures,
-            self.thermometric_parameter,
+            self.thermmap.temperatures[...],
+            self.thermometric_parameter[...],
             color='#6D597A',
             marker='o',
             facecolors='none'
@@ -508,22 +508,28 @@ class MainWindow(QMainWindow):
         current_index = self.fitting_functions_layout.currentIndex()
         fitting_function = list(dict_of_fitting_functions.values())[current_index]
         current_bounds = self.bounds_on_parameters[current_index]
+        current_initial_parameters = []
+        for value in self.initial_parameters[current_index]:
+            if value is None:
+                current_initial_parameters.append(1.0)
+            else:
+                current_initial_parameters.append(value)
         print(current_bounds)
         for index, block in enumerate(self.blocked_parameters[current_index]):
             if block and self.initial_parameters[current_index][index] is not None:
                 current_bounds[0] = self.initial_parameters[current_index][index]
-                current_bounds[1] = self.initial_parameters[current_index][index] + 1e-17
+                current_bounds[1] = self.initial_parameters[current_index][index] + 1e-7
         print(fitting_function, current_bounds, self.initial_parameters[current_index], self.thermometric_parameter)
 
         self.fitted_output_parameters, _ = curve_fit(
             f=fitting_function,
-            xdata=self.thermmap.temperatures,
+            xdata=self.thermmap.temperatures[...],
             ydata=self.thermometric_parameter,
-            p0=self.initial_parameters[current_index],
+            p0=current_initial_parameters,
             bounds=current_bounds
         )
-        print('alive')
-        fit_x = linspace(self.thermmap.temperatures[0], self.thermmap.temperatures[-1], 1000)
+        print('alive', type(self.thermmap.temperatures[...][0]), float(self.thermmap.temperatures[...][-1]), type(self.thermmap.temperatures[...]))
+        fit_x = linspace(start=float(self.thermmap.temperatures[0]), stop=float(self.thermmap.temperatures[-1]), num=1000)
         self.fitted_output_data = [fitting_function(x_value, *self.fitted_output_parameters) for x_value in fit_x]
         self.fitting_canvas.parameter_axes.plot(
             fit_x,
