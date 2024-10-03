@@ -3,8 +3,8 @@ from sys import argv
 import json
 from inspect import signature
 from functools import partial
-from scipy.optimize import curve_fit, least_squares
-from numpy import linspace
+from scipy.optimize import curve_fit
+from numpy import linspace, float64, gradient
 
 from PyQt6.QtWidgets import QCheckBox, QDialog, QSpinBox, QDialogButtonBox, QLabel, QMessageBox, QWidget, QVBoxLayout, \
     QApplication, QMainWindow, QFileDialog, QHBoxLayout, QGridLayout, QAbstractSpinBox, QComboBox, QTabWidget, \
@@ -65,7 +65,7 @@ class NumberedSciDSpinBox(QDoubleSpinBox):
 
     def valueFromText(self, text: str) -> float:
         try:
-            return float(text)
+            return float64(text)
         except ValueError:
             return 0.0
 
@@ -133,6 +133,8 @@ class MainWindow(QMainWindow):
         self.second_line_position = None
         self.normalization_position = None
         self.normalization_line = None
+        self.fitting_plot = None
+        self.sensitivity_plot = None
         self.resolution_of_x_data = abs(self.thermmap.data[-1, 0] - self.thermmap.data[-2, 0])
 
         self.cid1 = self.canvas.mpl_connect('button_press_event', self.on_click)
@@ -208,7 +210,7 @@ class MainWindow(QMainWindow):
         fitting_layouts = []
         fitting_containers = []
         fitting_buttons = []
-        fitting_boxes = []
+        self.fitting_boxes = []
         self.blocked_parameters = []
         self.bounds_on_parameters = []
         self.initial_parameters = []
@@ -218,7 +220,7 @@ class MainWindow(QMainWindow):
             temporary_layout = QGridLayout()
             temporary_container = QWidget()
             fitting_buttons.append([])
-            fitting_boxes.append([])
+            self.fitting_boxes.append([])
             self.blocked_parameters.append([])
             self.initial_parameters.append([])
             skip_x = True
@@ -234,13 +236,14 @@ class MainWindow(QMainWindow):
                 temporary_spinbox.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
                 temporary_spinbox.setKeyboardTracking(False)
                 temporary_spinbox.setMinimumWidth(80)
-                temporary_spinbox.setMaximum(1e18)
+                temporary_spinbox.setMinimum(self.bounds_on_parameters[fitting_function_index][0][adjusted_index])
+                temporary_spinbox.setMaximum(self.bounds_on_parameters[fitting_function_index][1][adjusted_index])
                 temporary_spinbox.setDecimals(18)
-                fitting_boxes[fitting_function_index].append(temporary_spinbox)
-                fitting_boxes[fitting_function_index][adjusted_index].valueChanged.connect(
-                    partial(self.on_set_starting_parameter, box=fitting_boxes[fitting_function_index][adjusted_index],
+                self.fitting_boxes[fitting_function_index].append(temporary_spinbox)
+                self.fitting_boxes[fitting_function_index][adjusted_index].valueChanged.connect(
+                    partial(self.on_set_starting_parameter, box=self.fitting_boxes[fitting_function_index][adjusted_index],
                             index=adjusted_index))
-                temporary_layout.addWidget(fitting_boxes[fitting_function_index][adjusted_index], adjusted_index, 1)
+                temporary_layout.addWidget(self.fitting_boxes[fitting_function_index][adjusted_index], adjusted_index, 1)
                 temporary_button = NumberedPushButton('Block', index=adjusted_index)
                 temporary_button.setCheckable(True)
                 fitting_buttons[fitting_function_index].append(temporary_button)
@@ -487,8 +490,6 @@ class MainWindow(QMainWindow):
         self.fitting_canvas.parameter_axes.set_ylabel('Intensity ratio', color='#6D597A')
         self.fitting_canvas.parameter_axes.tick_params(axis='y', labelcolor='#6D597A')
         self.fitting_canvas.draw()
-        # TODO: I will use scipy.optimisation.function_fit here
-        pass
 
     def on_fitting_function_changed(self, index):
         self.fitting_functions_layout.setCurrentIndex(index)
@@ -505,6 +506,7 @@ class MainWindow(QMainWindow):
     def start_fitting(self):
         if self.fitting_canvas is None:
             return
+        
         current_index = self.fitting_functions_layout.currentIndex()
         fitting_function = list(dict_of_fitting_functions.values())[current_index]
         current_bounds = self.bounds_on_parameters[current_index]
@@ -514,28 +516,48 @@ class MainWindow(QMainWindow):
                 current_initial_parameters.append(1.0)
             else:
                 current_initial_parameters.append(value)
-        print(current_bounds)
         for index, block in enumerate(self.blocked_parameters[current_index]):
             if block and self.initial_parameters[current_index][index] is not None:
-                current_bounds[0] = self.initial_parameters[current_index][index]
-                current_bounds[1] = self.initial_parameters[current_index][index] + 1e-7
-        print(fitting_function, current_bounds, self.initial_parameters[current_index], self.thermometric_parameter)
+                current_bounds[0][index] = self.initial_parameters[current_index][index]
+                current_bounds[1][index] = self.initial_parameters[current_index][index] + 1e-9
+            elif not block and self.initial_parameters[current_index][index] is not None:
+                current_bounds[0][index] = self.bounds_on_parameters[current_index][0][index]
+                current_bounds[1][index] = self.bounds_on_parameters[current_index][1][index]
+        print(current_initial_parameters, self.initial_parameters)
 
         self.fitted_output_parameters, _ = curve_fit(
             f=fitting_function,
-            xdata=self.thermmap.temperatures[...],
+            xdata=self.thermmap.temperatures,
             ydata=self.thermometric_parameter,
             p0=current_initial_parameters,
             bounds=current_bounds
         )
-        print('alive', type(self.thermmap.temperatures[...][0]), float(self.thermmap.temperatures[...][-1]), type(self.thermmap.temperatures[...]))
+        for index, parameter in enumerate(self.fitted_output_parameters):
+            self.fitting_boxes[current_index][index].setValue(parameter)
+        print('alive', self.fitted_output_parameters)
         fit_x = linspace(start=float(self.thermmap.temperatures[0]), stop=float(self.thermmap.temperatures[-1]), num=1000)
         self.fitted_output_data = [fitting_function(x_value, *self.fitted_output_parameters) for x_value in fit_x]
-        self.fitting_canvas.parameter_axes.plot(
+        if self.fitting_plot is not None:
+            self.fitting_plot[0].remove()
+        
+        self.fitting_plot = self.fitting_canvas.parameter_axes.plot(
             fit_x,
             self.fitted_output_data,
             color='#6D597A'
         )
+        
+        self.sensitivity = (abs(gradient(self.fitted_output_data, fit_x))/self.fitted_output_data)*100
+        if self.sensitivity_plot is not None:
+            self.sensitivity_plot[0].remove()
+        self.sensitivity_plot = self.fitting_canvas.sensitivity_axes.plot(
+            fit_x,
+            self.sensitivity,
+            color='#E56B6F'
+        )
+        self.fitting_canvas.sensitivity_axes.axhline(2, color='#444444', linestyle='--')
+        self.fitting_canvas.sensitivity_axes.set_ylabel(r'Relative sensitivity / %$\cdot\mathrm{K}^{-1}$', color='#E56B6F')
+        self.fitting_canvas.sensitivity_axes.tick_params(axis='y', labelcolor='#E56B6F')
+        
         self.fitting_canvas.draw()
 
 

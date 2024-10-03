@@ -1,6 +1,7 @@
-from numpy import exp, tanh, inf
+from numpy import exp, tanh
 
-boltzmann_constant_J_K = 1.380649e-23
+boltzmann_constant_J_K = 1 # values of energy in K
+parameters_limit = 1e4
 
 
 def single_mott_seitz(x, delta0, a1, e1):
@@ -32,10 +33,10 @@ dict_of_fitting_functions = {
 }
 
 dict_of_fitting_limits = {
-    'Single Mott-Seitz': [[-inf, 0, 0], [inf, inf, inf]],
-    'Double Mott-Seitz': [[-inf, 0, 0, 0, 0], [inf, inf, inf, inf, inf]],
-    'Linear': [[-inf, -inf], [inf, inf]],
-    'Exponential decay': [[-inf, 0], [inf, inf]],
-    'coth': [[-inf, 0, -inf], [inf, inf, inf]]
+    'Single Mott-Seitz': [[-parameters_limit, 0, 0], [parameters_limit, parameters_limit, parameters_limit]],
+    'Double Mott-Seitz': [[-parameters_limit, 0, 0, 0, 0], [parameters_limit, parameters_limit, parameters_limit, parameters_limit, parameters_limit]],
+    'Linear': [[-parameters_limit, -parameters_limit], [parameters_limit, parameters_limit]],
+    'Exponential decay': [[-parameters_limit, 0], [parameters_limit, parameters_limit]],
+    'coth': [[-parameters_limit, 0, -parameters_limit], [parameters_limit, parameters_limit, parameters_limit]]
 }
 
