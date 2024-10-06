@@ -4,7 +4,7 @@ import json
 from inspect import signature
 from functools import partial
 from scipy.optimize import curve_fit
-from numpy import linspace, float64, gradient
+from numpy import linspace, float64, gradient, sum
 
 from PyQt6.QtWidgets import QCheckBox, QDialog, QSpinBox, QDialogButtonBox, QLabel, QMessageBox, QWidget, QVBoxLayout, \
     QApplication, QMainWindow, QFileDialog, QHBoxLayout, QGridLayout, QAbstractSpinBox, QComboBox, QTabWidget, \
@@ -79,6 +79,132 @@ class NumberedPushButton(QPushButton):
         super().__init__(*args, **kwargs)
 
 
+class ErrorDeterminingDialog(QDialog):
+    def __init__(self, thermmap, parent=None):
+        super(ErrorDeterminingDialog, self).__init__(parent)
+        self.thermmap = thermmap
+
+        self.smoothed_data = None
+        self.smoothed_residual = None
+
+        self.setWindowTitle("Error Determining Method")
+        layout_outer = QGridLayout()
+        layout_plot = QVBoxLayout()
+        layout_ribbon = QGridLayout()
+
+        self.canvas = OutMplCanvas(self)
+        self.canvas.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum)
+        toolbar = NavigationToolbar(self.canvas, self)
+
+        self.window_length_widget = QSpinBox(
+            minimum=1,
+            maximum=1000,
+        )
+        self.window_length_widget.setValue(5)
+        self.window_length_widget.setKeyboardTracking(False)
+        self.window_length_widget.setMinimumWidth(150)
+        self.window_length_widget.valueChanged.connect(self.update)
+        self.window_length_widget.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+
+        self.polyorder_widget = QSpinBox(
+            minimum=1,
+            maximum=10,
+        )
+        self.polyorder_widget.setValue(2)
+        self.polyorder_widget.setKeyboardTracking(False)
+        self.polyorder_widget.setMinimumWidth(100)
+        self.polyorder_widget.valueChanged.connect(self.update)
+        self.polyorder_widget.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons) 
+
+        self.step_widget = QDoubleSpinBox(
+            minimum=0,
+            maximum=10,
+        )
+        self.step_widget.setDecimals(3)
+        self.step_widget.setValue(thermmap.resolution)
+        self.step_widget.setKeyboardTracking(False)
+        self.step_widget.setMinimumWidth(150)
+        self.step_widget.valueChanged.connect(self.update)
+        self.step_widget.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+
+        self.residula_widget = QDoubleSpinBox(
+            minimum=-1e6,
+            maximum=1e6,
+        )
+        self.step_widget.setDecimals(3)
+        self.step_widget.setReadOnly
+        self.step_widget.setMinimumWidth(150)
+        self.step_widget.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+
+        QButtons = (QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        self.button_box = QDialogButtonBox(QButtons)
+        self.button_box.accepted.connect(self.accept)
+        self.button_box.rejected.connect(self.reject)
+
+        layout_ribbon.addWidget(QLabel("To correctly determine error smooth data in a way that\n removes noise but do not obscure any peaks\nSmoothing options of Savitzky-Goloy filter"), 0, 0, 0, 1)
+        layout_ribbon.addWidget(QLabel("Window length"), 1, 0)
+        layout_ribbon.addWidget(self.window_length_widget, 1, 1)
+        layout_ribbon.addWidget(QLabel("Polynomial order"), 2, 0)
+        layout_ribbon.addWidget(self.polyorder_widget, 2, 1)
+        layout_ribbon.addWidget(QLabel("Step size"), 3, 0)
+        layout_ribbon.addWidget(self.step_widget, 3, 1)
+        layout_ribbon.addWidget(QLabel("Sum of all residuals should be as close to 0\nas posible for correct error determination"), 4, 0, 4, 1)
+        layout_ribbon.addWidget(QLabel("Sum of all residuals:"), 5, 0)
+        layout_ribbon.addWidget(self.residula_widget, 5, 1)
+        layout_ribbon.addWidget(self.button_box, 6, 0, 6, 1)
+
+        
+        layout_outer.addLayout(layout_plot, 0, 0)
+        layout_outer.addLayout(layout_ribbon, 0, 1)
+        layout_plot.addWidget(toolbar)
+        layout_plot.addWidget(self.canvas)
+        self.update()
+        self.setLayout(layout_outer)
+
+    def update(self, _=None):
+        self.smoothed_data, self.smoothed_residual = self.thermmap.smooth(
+            window_length=self.window_length_widget.value(),
+            polyorder=self.polyorder_widget.value(),
+            delta=self.step_widget.value()
+        )
+
+        if self.smoothed_data is not None:
+            self.canvas.parameter_axes.clear()
+            self.canvas.error_axes.clear()
+            
+        self.canvas.parameter_axes = luminescence_dt(
+            self.smoothed_data,
+            self.thermmap.temperatures,
+            self.canvas.parameter_axes,
+            colormap=mpl.colors.LinearSegmentedColormap.from_list(
+                        name='',
+                        colors=settings["plot_colormap"],
+                        N=len(self.thermmap.temperatures)
+                    )
+            )
+        self.canvas.error_axes.axvline(
+            x=0,
+            color='#444444', 
+            linestyle='--',
+        )
+        self.canvas.error_axes = luminescence_dt(
+            self.smoothed_residual,
+            self.thermmap.temperatures,
+            self.canvas.error_axes,
+            colormap=mpl.colors.LinearSegmentedColormap.from_list(
+                        name='',
+                        colors=settings["plot_colormap"],
+                        N=len(self.thermmap.temperatures)
+                    )
+            )
+        self.canvas.draw()
+        self.residula_widget.setValue(sum(self.smoothed_residual[:, 1:]))
+
+
+        
+
+
+
 class MainWindow(QMainWindow):
     def __init__(self, *args, **kwargs):
         super(MainWindow, self).__init__(*args, **kwargs)
@@ -110,15 +236,13 @@ class MainWindow(QMainWindow):
         self.fitting_canvas = None
         self.fitting_toolbar = None
 
-        list_of_colors = settings["plot_colormap"]
-
         self.canvas.axes = luminescence_dt(
             self.thermmap.data,
             self.thermmap.temperatures,
             self.canvas.axes,
             colormap=mpl.colors.LinearSegmentedColormap.from_list(
                 name='',
-                colors=list_of_colors,
+                colors=settings["plot_colormap"],
                 N=len(self.thermmap.temperatures))
         )
 
@@ -135,7 +259,6 @@ class MainWindow(QMainWindow):
         self.normalization_line = None
         self.fitting_plot = None
         self.sensitivity_plot = None
-        self.resolution_of_x_data = abs(self.thermmap.data[-1, 0] - self.thermmap.data[-2, 0])
 
         self.cid1 = self.canvas.mpl_connect('button_press_event', self.on_click)
         self.cid2 = self.canvas.mpl_connect('pick_event', self.on_pick)
@@ -165,7 +288,7 @@ class MainWindow(QMainWindow):
         self.first_value_widget = QDoubleSpinBox(
             minimum=self.thermmap.data[0, 0],
             maximum=self.thermmap.data[-1, 0],
-            singleStep=self.resolution_of_x_data
+            singleStep=self.thermmap.resolution
         )
         self.first_value_widget.setKeyboardTracking(False)
         self.first_value_widget.setMinimumWidth(150)
@@ -174,7 +297,7 @@ class MainWindow(QMainWindow):
         self.second_value_widget = QDoubleSpinBox(
             minimum=self.thermmap.data[0, 0],
             maximum=self.thermmap.data[-1, 0],
-            singleStep=self.resolution_of_x_data
+            singleStep=self.thermmap.resolution
         )
         self.second_value_widget.setKeyboardTracking(False)
         self.second_value_widget.setMinimumWidth(150)
@@ -186,7 +309,7 @@ class MainWindow(QMainWindow):
         self.normalization_value_widget = QDoubleSpinBox(
             minimum=self.thermmap.data[0, 0],
             maximum=self.thermmap.data[-1, 0],
-            singleStep=self.resolution_of_x_data
+            singleStep=self.thermmap.resolution
         )
         self.normalization_value_widget.setKeyboardTracking(False)
         self.normalization_value_widget.setMinimumWidth(150)
@@ -265,6 +388,11 @@ class MainWindow(QMainWindow):
         self.start_fitting_button.clicked.connect(self.start_fitting)
         layout_ribbon.addWidget(self.start_fitting_button)
 
+        self.determine_error_button = QPushButton('Determine Error')
+        self.determine_error_button.setEnabled(False)
+        self.determine_error_button.clicked.connect(self.determine_error)
+        layout_ribbon.addWidget(self.determine_error_button)
+
         self.layout_main.addLayout(layout_ribbon)
 
         widget = QWidget()
@@ -277,7 +405,7 @@ class MainWindow(QMainWindow):
         if type(event.button) is str:
             return
         else:
-            value = quantization_to_resolution(event.xdata, self.resolution_of_x_data)
+            value = quantization_to_resolution(event.xdata, self.thermmap.resolution)
         if event.button == event.button.LEFT:
             if self.first_click:
                 self.first_value_widget.setValue(value)
@@ -319,7 +447,7 @@ class MainWindow(QMainWindow):
             self.normalized_canvas.draw()
 
     def on_first_value_changed(self, value):
-        new_value = quantization_to_resolution(value, self.resolution_of_x_data)
+        new_value = quantization_to_resolution(value, self.thermmap.resolution)
         if new_value != value:
             self.first_value_widget.setValue(new_value)
             return
@@ -351,7 +479,7 @@ class MainWindow(QMainWindow):
         self.normalized_canvas.draw()
 
     def on_second_value_changed(self, value):
-        new_value = quantization_to_resolution(value, self.resolution_of_x_data)
+        new_value = quantization_to_resolution(value, self.thermmap.resolution)
         if new_value != value:
             self.second_value_widget.setValue(new_value)
             return
@@ -383,7 +511,7 @@ class MainWindow(QMainWindow):
         self.normalized_canvas.draw()
 
     def on_normalization_value_changed(self, value):
-        new_value = quantization_to_resolution(value, self.resolution_of_x_data)
+        new_value = quantization_to_resolution(value, self.thermmap.resolution)
         if new_value != value:
             self.normalization_value_widget.setValue(new_value)
             return
@@ -417,7 +545,6 @@ class MainWindow(QMainWindow):
         if self.normalization_position is not None:
             if checked:
                 self.normalization_button.setText('Denormalize')
-                list_of_colors = settings["plot_colormap"]
                 self.normalized_canvas.axes.cla()
                 self.normalized_canvas.axes = luminescence_dt(
                     self.thermmap.normalize(self.normalization_position),
@@ -425,7 +552,7 @@ class MainWindow(QMainWindow):
                     self.normalized_canvas.axes,
                     colormap=mpl.colors.LinearSegmentedColormap.from_list(
                         name='',
-                        colors=list_of_colors,
+                        colors=settings["plot_colormap"],
                         N=len(self.thermmap.temperatures)
                     ))
                 if self.first_line_position is not None:
@@ -523,7 +650,6 @@ class MainWindow(QMainWindow):
             elif not block and self.initial_parameters[current_index][index] is not None:
                 current_bounds[0][index] = self.bounds_on_parameters[current_index][0][index]
                 current_bounds[1][index] = self.bounds_on_parameters[current_index][1][index]
-        print(current_initial_parameters, self.initial_parameters)
 
         self.fitted_output_parameters, _ = curve_fit(
             f=fitting_function,
@@ -534,7 +660,7 @@ class MainWindow(QMainWindow):
         )
         for index, parameter in enumerate(self.fitted_output_parameters):
             self.fitting_boxes[current_index][index].setValue(parameter)
-        print('alive', self.fitted_output_parameters)
+
         fit_x = linspace(start=float(self.thermmap.temperatures[0]), stop=float(self.thermmap.temperatures[-1]), num=1000)
         self.fitted_output_data = [fitting_function(x_value, *self.fitted_output_parameters) for x_value in fit_x]
         if self.fitting_plot is not None:
@@ -549,16 +675,24 @@ class MainWindow(QMainWindow):
         self.sensitivity = (abs(gradient(self.fitted_output_data, fit_x))/self.fitted_output_data)*100
         if self.sensitivity_plot is not None:
             self.sensitivity_plot[0].remove()
+        else:
+            self.fitting_canvas.sensitivity_axes.axhline(1, color='#444444', linestyle='--')
         self.sensitivity_plot = self.fitting_canvas.sensitivity_axes.plot(
             fit_x,
             self.sensitivity,
             color='#E56B6F'
         )
-        self.fitting_canvas.sensitivity_axes.axhline(2, color='#444444', linestyle='--')
         self.fitting_canvas.sensitivity_axes.set_ylabel(r'Relative sensitivity / %$\cdot\mathrm{K}^{-1}$', color='#E56B6F')
         self.fitting_canvas.sensitivity_axes.tick_params(axis='y', labelcolor='#E56B6F')
+        self.fitting_canvas.sensitivity_axes.autoscale()
         
         self.fitting_canvas.draw()
+        self.determine_error_button.setEnabled(True)
+
+    def determine_error(self):
+        dialog = ErrorDeterminingDialog(self.thermmap, self)
+        dialog.exec()
+        pass
 
 
 def run_gui():
