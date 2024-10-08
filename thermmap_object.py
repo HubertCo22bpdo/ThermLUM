@@ -15,7 +15,7 @@ class ThermMap:
         self.temperatures = None
 
     def get_data(self):
-        self.data = self.file[self.name][f'data_{self.name}']
+        self.data = self.file[self.name][f'data_{self.name}'][...]
         self.x_data = self.data[:, 0].astype(np.float64)
         self.resolution = abs(self.data[-1, 0] - self.data[-2, 0])
         return self.data
@@ -30,6 +30,14 @@ class ThermMap:
             for index, value in enumerate(self.x_data):
                 if value == x_value:
                     row = self.data[index, 1:]
+                    return row
+    
+    @staticmethod
+    def general_get_row_of_ydata(data, x_value):
+            x_data = data[:, 0].astype(np.float64)
+            for index, value in enumerate(x_data):
+                if value == x_value:
+                    row = data[index, 1:]
                     return row
 
     def normalize(self, normalization_value, save=False):
@@ -47,10 +55,10 @@ class ThermMap:
             self.get_data()
         if self.temperatures is None:
             self.get_temperatures()
-        smoothed_data = self.data
+        smoothed_data = self.data.copy()
         for index, column in enumerate(smoothed_data[:, 1:].T):
             smoothed_data[:, index + 1] = savgol_filter(column, window_length=window_length, polyorder=polyorder, delta=delta, deriv=0)
-        smooth_residual =  np.vstack((self.temperatures, smoothed_data[:, 1:] - self.data[:, 1:])).T
+        smooth_residual =  np.vstack((self.x_data, (smoothed_data[:, 1:] - self.data[:, 1:]).T)).T
         if save:
             try:
                 self.file[self.name][f'data_{self.name}_smoothed'] = smoothed_data
