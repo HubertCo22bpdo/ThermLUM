@@ -5,6 +5,7 @@ from inspect import signature
 from functools import partial
 from scipy.optimize import curve_fit
 from numpy import linspace, float64, gradient, sum, sqrt, diag, isclose, array
+from pandas import DataFrame, Series
 
 from PyQt6.QtWidgets import QCheckBox, QDialog, QSpinBox, QDialogButtonBox, QLabel, QMessageBox, QWidget, QVBoxLayout, \
     QApplication, QMainWindow, QFileDialog, QHBoxLayout, QGridLayout, QAbstractSpinBox, QComboBox, QTabWidget, \
@@ -49,6 +50,8 @@ class OutMplCanvas(FigureCanvasQTAgg):
         fig.subplots_adjust(bottom=0.15, left=0.15)
         fig.tight_layout()
         self.parameter_axes = fig.add_subplot(3, 1, (1, 2))
+        self.parameter_axes.tick_params(axis='x', which='both', labelbottom=False, bottom=False)
+        self.parameter_axes.set_xlabel(None)
         self.sensitivity_axes = self.parameter_axes.twinx()
         self.error_axes = fig.add_subplot(3, 1, 3)
         super(OutMplCanvas, self).__init__(fig)
@@ -186,8 +189,7 @@ class ErrorDeterminingDialog(QDialog):
                         N=len(self.thermmap.temperatures)
                     )
             )
-        self.canvas.parameter_axes.tick_params(axis='x', which='both', labelbottom=False, bottom=False)
-        self.canvas.parameter_axes.set_xlabel(None)
+        
         self.canvas.error_axes.axhline(
             y=0,
             color='#444444', 
@@ -268,6 +270,7 @@ class MainWindow(QMainWindow):
         self.fitting_plot = None
         self.sensitivity_plot = None
         self.error_bar_plot = None
+        self.temperature_err = None
 
         self.cid1 = self.canvas.mpl_connect('button_press_event', self.on_click)
         self.cid2 = self.canvas.mpl_connect('pick_event', self.on_pick)
@@ -401,6 +404,11 @@ class MainWindow(QMainWindow):
         self.determine_error_button.setEnabled(False)
         self.determine_error_button.clicked.connect(self.determine_error)
         layout_ribbon.addWidget(self.determine_error_button)
+
+        self.export_data_button = QPushButton('Export Data')
+        self.export_data_button.setEnabled(False)
+        self.export_data_button.clicked.connect(self.export_data)
+        layout_ribbon.addWidget(self.export_data_button)
 
         self.layout_main.addLayout(layout_ribbon)
 
@@ -673,24 +681,24 @@ class MainWindow(QMainWindow):
         for index, parameter in enumerate(self.fitted_output_parameters):
             self.fitting_boxes[current_index][index].setValue(parameter)
 
-        fit_x = linspace(start=float(self.thermmap.temperatures[0]), stop=float(self.thermmap.temperatures[-1]), num=1000)
-        self.fitted_output_data = [fitting_function(x_value, *self.fitted_output_parameters) for x_value in fit_x]
+        self.fit_x = linspace(start=float(self.thermmap.temperatures[0]), stop=float(self.thermmap.temperatures[-1]), num=1000)
+        self.fitted_output_data = [fitting_function(x_value, *self.fitted_output_parameters) for x_value in self.fit_x]
 
         if self.fitting_plot is not None:
             self.fitting_plot[0].remove()
         self.fitting_plot = self.fitting_canvas.parameter_axes.plot(
-            fit_x,
+            self.fit_x,
             self.fitted_output_data,
             color='#6D597A'
         )
         
-        self.sensitivity = (abs(gradient(self.fitted_output_data, fit_x))/self.fitted_output_data)*100
+        self.sensitivity = (abs(gradient(self.fitted_output_data, self.fit_x))/self.fitted_output_data)*100
         self.discontinuous_sensitivity = []
         scale_index = 0
         while len(self.discontinuous_sensitivity) != len(self.thermmap.temperatures):
             self.discontinuous_sensitivity = []
             for temperature in self.thermmap.temperatures:
-                for index, value in enumerate(fit_x):
+                for index, value in enumerate(self.fit_x):
                     if isclose(temperature, value, rtol=10**(-5+scale_index)):
                         self.discontinuous_sensitivity.append(self.sensitivity[index])
                         break
@@ -701,7 +709,7 @@ class MainWindow(QMainWindow):
         else:
             self.fitting_canvas.sensitivity_axes.axhline(1, color='#444444', linestyle='--')
         self.sensitivity_plot = self.fitting_canvas.sensitivity_axes.plot(
-            fit_x,
+            self.fit_x,
             self.sensitivity,
             color='#E56B6F'
         )
@@ -711,6 +719,7 @@ class MainWindow(QMainWindow):
         
         self.fitting_canvas.draw()
         self.determine_error_button.setEnabled(True)
+        self.export_data_button.setEnabled(True)
 
     def determine_error(self):
         dialog = ErrorDeterminingDialog(self.thermmap, self)
@@ -721,24 +730,52 @@ class MainWindow(QMainWindow):
                                                               (self.thermmap.general_get_row_of_ydata(self.smoothed_residual, self.second_line_position) / self.thermmap.get_row_of_ydata(self.second_line_position))**2)
 
             # function_err = list(dict_of_fitting_errors_functions.values())[self.fitting_functions_layout.currentIndex()](self.thermometric_parameter, *self.fitted_output_parameters, *self.parameter_errors)
+            function_err = abs(self.thermometric_parameter - list(dict_of_fitting_functions.values())[self.fitting_functions_layout.currentIndex()](self.thermometric_parameter, *self.fitted_output_parameters))
 
-            # total_err = sqrt(detector_err**2 + function_err**2)
-            total_err = detector_err
+            total_err = sqrt(detector_err**2 + function_err**2)
 
-            temperature_err = (total_err / self.thermometric_parameter) * (1 / self.discontinuous_sensitivity)
+            self.temperature_err = (total_err / self.thermometric_parameter) * (1 / self.discontinuous_sensitivity)
 
             if self.error_bar_plot is not None:
                 self.error_bar_plot[0].remove()
             self.error_bar_plot = self.fitting_canvas.error_axes.bar(
                 self.thermmap.temperatures,
-                temperature_err,
+                self.temperature_err,
                 color='#E56B6F',
-                width=10
+                width=8
             )
             self.fitting_canvas.error_axes.set_ylim(0, 2)
+            self.fitting_canvas.error_axes.set_ylabel(r'Error / $\mathrm{K}$', color='#E56B6F')
             self.fitting_canvas.draw()
         else:
             return
+
+    def export_data(self):
+        result_dict = {
+            'Wavlengths / nm': self.thermmap.data[:, 0],
+        }
+        for index, temperature in enumerate(self.thermmap.temperatures):
+            result_dict[f'Intensity {temperature} K / cps'] = self.thermmap.data[:, index + 1]
+        result_dict['Temperature / K'] = self.thermmap.temperatures
+        result_dict[f'Parameter {self.first_line_position} nm / {self.second_line_position} nm'] = self.thermometric_parameter
+        result_dict['Fit temperature / K'] = self.fit_x
+        result_dict['Fitted parameter'] = self.fitted_output_data
+        result_dict['Relative sensitivity / %K^(-1)'] = self.sensitivity
+        if self.temperature_err is not None:
+            result_dict['Error temperature / K'] = self.thermmap.temperatures
+            result_dict['Temperature error / K'] = self.temperature_err
+        for index, fitted_parameter in enumerate(signature(list(dict_of_fitting_functions.values())[self.fitting_functions_layout.currentIndex()]).parameters):
+            if index == 0:
+                continue
+            result_dict[f'Fitted parameter {fitted_parameter}'] = self.fitted_output_parameters[index - 1]
+            result_dict[f'Parameter error {fitted_parameter}'] = self.parameter_errors[index - 1]
+        # self.result = DataFrame.from_dict(result_dict)
+        self.result = DataFrame(dict([(key, Series(value)) for key, value in result_dict.items()]))
+        if settings['fast_export']:
+            self.result.to_csv(path.join(settings['recently_opened_folder'], f'Thermometric parameter {self.first_line_position}l{self.second_line_position}.csv'), index=False)
+        else:
+            filename = QFileDialog.getSaveFileName(caption='Save result to a file', directory=settings['recently_opened_folder'], filter='CSV Files (*.csv);;Text Files (*.txt);;Data Files (*.dat);;All files (*.*)', initialFilter='CSV Files (*.csv)')
+            self.result.to_csv(filename)
 
         
 

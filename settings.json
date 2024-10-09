@@ -1,5 +1,5 @@
 {
-"recently_opened_folder": "C:/Users/hu3rt/Desktop/[Ln(2,2'-bpdo)4][Cr(CN)6]/EuCr_22bpdo_dT",
+"recently_opened_folder": "~",
 "default_file_type": "Text Files (*.txt)",
 "plot_colormap": [
 "#E5EEFF",
@@ -16,5 +16,6 @@
 ],
 "plot_width": 5.5,
 "plot_height": 5,
-"plot_dpi": 110
+"plot_dpi": 110,
+"fast_export": true
 }
