@@ -7,26 +7,20 @@ from scipy.optimize import curve_fit
 from numpy import linspace, float64, gradient, sum, sqrt, diag, isclose, array
 from pandas import DataFrame, Series
 
-from PyQt6.QtWidgets import QCheckBox, QDialog, QSpinBox, QDialogButtonBox, QLabel, QMessageBox, QWidget, QVBoxLayout, \
-    QApplication, QMainWindow, QFileDialog, QHBoxLayout, QGridLayout, QAbstractSpinBox, QComboBox, QTabWidget, \
-    QFormLayout, \
-    QColorDialog, QFrame, QDoubleSpinBox, QPushButton, QStackedLayout, QSizePolicy
-from PyQt6.QtGui import QAction, QCloseEvent, QIcon, QFont, QColor
-from PyQt6.QtCore import QSize, Qt, pyqtSignal
+from PyQt6.QtWidgets import QDialog, QSpinBox, QDialogButtonBox, QLabel, QWidget, QVBoxLayout, \
+    QApplication, QMainWindow, QFileDialog, QHBoxLayout, QGridLayout, QAbstractSpinBox, QComboBox, \
+    QFormLayout, QDoubleSpinBox, QPushButton, QStackedLayout, QSizePolicy
+from PyQt6.QtGui import QIcon
 
 import matplotlib as mpl  # import matplotlib after PyQt6
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
-from matplotlib.backends.backend_qtagg import (
-    NavigationToolbar2QT as NavigationToolbar,
-)
+from matplotlib.backends.backend_qtagg import (NavigationToolbar2QT as NavigationToolbar)
 from matplotlib.figure import Figure
-from matplotlib.axes import Axes
-from matplotlib.pyplot import close
 
 from creation import new
 from utilities import quantization_to_resolution
 from plotting import luminescence_dt
-from fitting_functions import dict_of_fitting_functions, dict_of_fitting_limits, dict_of_fitting_errors_functions
+from fitting_functions import dict_of_fitting_functions, dict_of_fitting_limits
 
 mpl.use("QtAgg")
 
@@ -54,6 +48,7 @@ class OutMplCanvas(FigureCanvasQTAgg):
         self.parameter_axes.set_xlabel(None)
         self.sensitivity_axes = self.parameter_axes.twinx()
         self.error_axes = fig.add_subplot(3, 1, 3)
+        self.error_axes.sharex(self.parameter_axes)
         super(OutMplCanvas, self).__init__(fig)
 
 
@@ -91,6 +86,7 @@ class ErrorDeterminingDialog(QDialog):
         self.smoothed_residual = None
 
         self.setWindowTitle("Error Determining Method")
+        self.setWindowIcon(QIcon(r'.\icon\app_icon.tiff'))
         layout_outer = QGridLayout()
         layout_plot = QVBoxLayout()
         layout_ribbon = QGridLayout()
@@ -633,6 +629,7 @@ class MainWindow(QMainWindow):
         )
         self.fitting_canvas.parameter_axes.set_ylabel('Intensity ratio', color='#6D597A')
         self.fitting_canvas.parameter_axes.tick_params(axis='y', labelcolor='#6D597A')
+        self.fitting_canvas.error_axes.set_xlabel('Temperature / K')
         self.fitting_canvas.draw()
 
     def on_fitting_function_changed(self, index):
@@ -745,7 +742,7 @@ class MainWindow(QMainWindow):
                 width=8
             )
             self.fitting_canvas.error_axes.set_ylim(0, 2)
-            self.fitting_canvas.error_axes.set_ylabel(r'Error / $\mathrm{K}$', color='#E56B6F')
+            self.fitting_canvas.error_axes.set_ylabel(r'Error / $\mathrm{K}$')
             self.fitting_canvas.draw()
         else:
             return
@@ -784,11 +781,10 @@ def run_gui():
     # QApp
     app = QApplication(argv)
     app.setApplicationName('ThermLUM')
+    app.setWindowIcon(QIcon(r'.\icon\app_icon.tiff'))
     # QWidget (MainWindow)
     window = MainWindow()
     window.show()
     app.exec()
 
 
-if __name__ == '__main__':
-    run_gui()
