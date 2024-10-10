@@ -85,4 +85,4 @@ dict_of_fitting_errors_functions = {
     'Exponential decay': exponential_decay_error,
     'coth': coth_vibration_error
 }
-
+#NEWLINE

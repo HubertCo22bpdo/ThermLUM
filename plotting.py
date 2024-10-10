@@ -12,7 +12,7 @@
 # GNU General Public License for more details.
 import matplotlib.pyplot as plt
 import numpy as np
-
+#EGG
 
 def luminescence_dt(data, temperatures, axes: plt.Axes, colormap):
     counter = 0

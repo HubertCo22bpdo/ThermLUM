@@ -1,7 +1,7 @@
-h5py==3.11.0
+h5py
 matplotlib==3.8.0
-numpy==2.1.2
-pandas==2.2.3
-PyQt6==6.7.1
-PyQt6_sip==13.8.0
-scipy==1.14.1
+numpy
+pandas
+PyQt6
+PyQt6_sip
+scipy
