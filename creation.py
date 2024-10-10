@@ -1,4 +1,4 @@
-# TherLUM - luminescent thermometry data analysis application
+# ThermLUM - luminescent thermometry data analysis application
 # Copyright (C) 2024  Hubert Dzielak 
 
 # This program is free software: you can redistribute it and/or modify
