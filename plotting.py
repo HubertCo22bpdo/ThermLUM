@@ -11,7 +11,6 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU General Public License for more details.
 import matplotlib.pyplot as plt
-import numpy as np
 
 
 def luminescence_dt(data, temperatures, axes: plt.Axes, colormap):
