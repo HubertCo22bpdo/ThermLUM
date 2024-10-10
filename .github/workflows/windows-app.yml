@@ -1,0 +1,52 @@
+name: Create windows application
+
+on:
+  push:
+    branches: [ "1.0" ]
+  pull_request:
+    branches: [ "1.0" ]
+
+jobs:
+  build:
+
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v3
+      with:
+        python-version: "3.12"
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
+        pip install pyinstaller
+    - name: Build application and ru Inno Setup
+      run: |
+        python -m PyInstaller --onefile --noconsole --icon="icon\app_icon.tiff" --name="ThermLUM" --uac-admin start_app.py
+        iscc ".\ThermLUM.iss"
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: 1.0.0 #VERSION
+        release_name: Release 1.0.0  #VERSION
+        draft: false
+        prerelease: false
+    - name: Upload Release Asset
+      id: upload-release-asset 
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }} # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object, which include a `upload_url`. See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps 
+        asset_path: ./dist/ThermLUMsetup.exe
+        asset_name: ThermLUMsetup.exe
+        asset_content_type: application/x-msdownload
+
+    - uses: actions/upload-artifact@v2
+      with:
+        name: ThermLUMsetup.exe
+        path: ./dist/ThermLUMsetup.exe
