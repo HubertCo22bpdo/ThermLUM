@@ -12,7 +12,6 @@
 # GNU General Public License for more details.
 import pandas as pd
 import h5py
-import numpy as np
 from os import path
 def new(file_path, hdf_name):
     file_directory, file_name = path.split(file_path)
