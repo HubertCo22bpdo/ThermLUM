@@ -237,8 +237,6 @@ class MainWindow(QMainWindow):
             filters, selectedFilter)
 
         settings['recently_opened_folder'] = path.split(file_path)[0]
-        with open('./settings.json', 'r+') as settings_json:
-            settings_json.write(json.dumps(settings, indent=0))
 
         self.thermmap = new(file_path, path.split(file_path)[1][:-4])
         self.thermmap.get_data()
@@ -785,6 +783,11 @@ class MainWindow(QMainWindow):
         else:
             filename = QFileDialog.getSaveFileName(caption='Save result to a file', directory=settings['recently_opened_folder'], filter='CSV Files (*.csv);;Text Files (*.txt);;Data Files (*.dat);;All files (*.*)', initialFilter='CSV Files (*.csv)')
             self.result.to_csv(filename)
+
+        
+    def closeEvent(self, event):
+        with open('./settings.json', 'w') as settings_json:
+            settings_json.write(json.dumps(settings, indent=0))
 
         
 

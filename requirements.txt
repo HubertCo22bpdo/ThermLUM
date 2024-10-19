@@ -1,7 +1,9 @@
 h5py
 matplotlib==3.8.0
-numpy
+numpy>=2.0
 pandas
 PyQt6
 PyQt6_sip
 scipy
+requests
+webbrowser

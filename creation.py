@@ -12,7 +12,7 @@
 # GNU General Public License for more details.
 import pandas as pd
 import h5py
-from os import path
+from os import path, remove
 def new(file_path, hdf_name):
     file_directory, file_name = path.split(file_path)
     with open(file_path, "r") as file:
@@ -48,6 +48,11 @@ def new(file_path, hdf_name):
     group.create_dataset(f'data_{hdf_name}', data=data_df)
     group.create_dataset(f'temperatures_{hdf_name}', data=temps)
     hdf_file.close()
+
+    if path.exists(path.join(file_directory, f'description_{file_name.split('.')[0]}')): 
+        remove(path.join(file_directory, f'description_{file_name.split('.')[0]}'))
+    if path.exists(path.join(file_directory, f'_temp_data)_{file_name.split('.')[0]}.csv')): 
+        remove(path.join(file_directory, f'_temp_data)_{file_name.split('.')[0]}.csv'))
 
     from thermmap_object import ThermMap
     return ThermMap(hdf_file_path)
