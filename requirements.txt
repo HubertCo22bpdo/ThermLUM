@@ -5,5 +5,3 @@ pandas
 PyQt6
 PyQt6_sip
 scipy
-requests
-webbrowser
