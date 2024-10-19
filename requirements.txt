@@ -1,6 +1,6 @@
 h5py
 matplotlib==3.8.0
-numpy>=2.0
+numpy
 pandas
 PyQt6
 PyQt6_sip

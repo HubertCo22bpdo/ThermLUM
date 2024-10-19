@@ -38,7 +38,7 @@ class Launcher(QApplication):
 
 response = requests.get("https://api.github.com/repos/HubertCo22bpdo/ThermLUM/releases")
 if response.ok:
-    release = "1.0.2" #VERSION
+    release = "1.0.3" #VERSION
     latest_relase= response.json()[0]["tag_name"]
     if latest_relase != release:
         launcher = Launcher(sys.argv)
