@@ -21,8 +21,10 @@ from pandas import DataFrame, Series
 
 from PyQt6.QtWidgets import QDialog, QSpinBox, QDialogButtonBox, QLabel, QWidget, QVBoxLayout, \
     QApplication, QMainWindow, QFileDialog, QHBoxLayout, QGridLayout, QAbstractSpinBox, QComboBox, \
-    QFormLayout, QDoubleSpinBox, QPushButton, QStackedLayout, QSizePolicy
+    QFormLayout, QDoubleSpinBox, QPushButton, QStackedLayout, QSizePolicy, QCheckBox, QButtonGroup, QGroupBox
 from PyQt6.QtGui import QIcon
+from PyQt6.QtCore import Qt
+
 
 import matplotlib as mpl  # import matplotlib after PyQt6
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
@@ -152,7 +154,7 @@ class ErrorDeterminingDialog(QDialog):
         self.button_box.accepted.connect(self.accept)
         self.button_box.rejected.connect(self.reject)
 
-        layout_ribbon.addWidget(QLabel("To correctly determine error smooth data in a way that removes noise but do not obscure any peaks.\n Smoothing options of Savitzky-Goloy filter"), 0, 0)
+        layout_ribbon.addWidget(QLabel("To correctly determine error smooth data in a way that removes noise but do not obscure any peaks.\nSmoothing options of Savitzky-Goloy filter"), 0, 0)
         layout_ribbon.addWidget(QLabel("Window length"), 1, 0)
         layout_ribbon.addWidget(self.window_length_widget, 1, 1)
         layout_ribbon.addWidget(QLabel("Polynomial order"), 2, 0)
@@ -162,7 +164,38 @@ class ErrorDeterminingDialog(QDialog):
         layout_ribbon.addWidget(QLabel("Sum of all residuals should be as close to 0 as posible for correct error determination"), 4, 0)
         layout_ribbon.addWidget(QLabel("Sum of all residuals:"), 5, 0)
         layout_ribbon.addWidget(self.residula_widget, 5, 1)
-        layout_ribbon.addWidget(self.button_box, 6, 0, 6, 1)
+        
+
+        layout_ribbon.addWidget(QLabel("Detector error's setettings:"), 6, 0)
+        # Constant error option 
+        self.constant_detector_error_checkbox = QCheckBox('Constant error')
+        layout_ribbon.addWidget(self.constant_detector_error_checkbox, 7, 0)
+        self.constant_detector_error_spinbox = QSpinBox(
+            minimum=1,
+            maximum=1000000,
+        )
+        self.constant_detector_error_spinbox.setValue(250)
+        self.constant_detector_error_spinbox.setKeyboardTracking(False)
+        self.constant_detector_error_spinbox.setMinimumWidth(150)
+        self.constant_detector_error_spinbox.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+        layout_ribbon.addWidget(self.constant_detector_error_spinbox, 7, 1)
+        self.constant_detector_error_checkbox.stateChanged.connect(lambda: self.handle_detector_checkbox(self.constant_detector_error_checkbox))
+
+        # Smooth error option
+        self.smoothed_detector_error_checkbox = QCheckBox('Determined from smoothing')
+        layout_ribbon.addWidget(self.smoothed_detector_error_checkbox, 8, 0)
+        self.smoothed_detector_error_checkbox.stateChanged.connect(lambda: self.handle_detector_checkbox(self.smoothed_detector_error_checkbox))
+
+
+        layout_ribbon.addWidget(QLabel("Function error's setettings:"), 9, 0)
+        function_error_group = QButtonGroup()
+        self.easy_function_error_checkbox = QCheckBox('Fit - exp diffrence error')
+        layout_ribbon.addWidget(self.easy_function_error_checkbox, 10, 0)
+
+        function_error_group.addButton(self.easy_function_error_checkbox)
+
+
+        layout_ribbon.addWidget(self.button_box, 11, 0, 11, 1)
 
         
         layout_outer.addLayout(layout_plot, 0, 0)
@@ -171,6 +204,18 @@ class ErrorDeterminingDialog(QDialog):
         layout_plot.addWidget(self.canvas)
         self.update()
         self.setLayout(layout_outer)
+
+    def handle_detector_checkbox(self, selected_checkbox):
+        # Uncheck other checkboxes
+        for checkbox in [self.constant_detector_error_checkbox, self.smoothed_detector_error_checkbox]:
+            if checkbox != selected_checkbox:
+                checkbox.blockSignals(True)  # Temporarily block signals to prevent recursion
+                checkbox.setChecked(False)
+                checkbox.blockSignals(False)  # Re-enable signals
+        if self.constant_detector_error_checkbox.isChecked():
+            self.constant_detector_error_spinbox.setEnabled(True)
+        else:
+            self.constant_detector_error_spinbox.setEnabled(False)
 
     def update(self, _=None):
         window_length = self.window_length_widget.value()
@@ -275,8 +320,10 @@ class MainWindow(QMainWindow):
         self.normalization_line = None
         self.fitting_plot = None
         self.sensitivity_plot = None
-        self.error_bar_plot = None
-        self.temperature_err = None
+        self.error_bar_plot_detector = None
+        self.error_bar_plot_function = None
+        self.temperature_err_detector = None
+        self.temperature_err_function = None
 
         self.cid1 = self.canvas.mpl_connect('button_press_event', self.on_click)
         self.cid2 = self.canvas.mpl_connect('pick_event', self.on_pick)
@@ -731,25 +778,42 @@ class MainWindow(QMainWindow):
     def determine_error(self):
         dialog = ErrorDeterminingDialog(self.thermmap, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.smoothed_data, self.smoothed_residual = dialog.smoothed_data, dialog.smoothed_residual
+            if dialog.smoothed_detector_error_checkbox.isChecked():
+                self.smoothed_data, self.smoothed_residual = dialog.smoothed_data, dialog.smoothed_residual
 
-            detector_err = self.thermometric_parameter * sqrt((self.thermmap.general_get_row_of_ydata(self.smoothed_residual, self.first_line_position) / self.thermmap.get_row_of_ydata(self.first_line_position))**2 + 
+                detector_err = self.thermometric_parameter * sqrt((self.thermmap.general_get_row_of_ydata(self.smoothed_residual, self.first_line_position) / self.thermmap.get_row_of_ydata(self.first_line_position))**2 + 
                                                               (self.thermmap.general_get_row_of_ydata(self.smoothed_residual, self.second_line_position) / self.thermmap.get_row_of_ydata(self.second_line_position))**2)
-
-            # function_err = list(dict_of_fitting_errors_functions.values())[self.fitting_functions_layout.currentIndex()](self.thermometric_parameter, *self.fitted_output_parameters, *self.parameter_errors)
-            function_err = abs(self.thermometric_parameter - list(dict_of_fitting_functions.values())[self.fitting_functions_layout.currentIndex()](self.thermometric_parameter, *self.fitted_output_parameters))
+            elif dialog.constant_detector_error_checkbox.isChecked():
+                constant_err = dialog.constant_detector_error_spinbox.value()
+                detector_err = self.thermometric_parameter * sqrt((constant_err / self.thermmap.get_row_of_ydata(self.first_line_position))**2 + (constant_err / self.thermmap.get_row_of_ydata(self.second_line_position))**2)
+            if dialog.easy_function_error_checkbox.isChecked():
+                # function_err = list(dict_of_fitting_errors_functions.values())[self.fitting_functions_layout.currentIndex()](self.thermometric_parameter, *self.fitted_output_parameters, *self.parameter_errors)
+                function_err = abs(self.thermometric_parameter - list(dict_of_fitting_functions.values())[self.fitting_functions_layout.currentIndex()](self.thermometric_parameter, *self.fitted_output_parameters))
+            else:
+                function_err = 0
 
             total_err = sqrt(detector_err**2 + function_err**2)
 
-            self.temperature_err = (total_err / self.thermometric_parameter) * (1 / self.discontinuous_sensitivity)
+            percent_detector = detector_err / (detector_err + function_err)
 
-            if self.error_bar_plot is not None:
-                self.error_bar_plot[0].remove()
-            self.error_bar_plot = self.fitting_canvas.error_axes.bar(
+            self.temperature_err_detector = (total_err * percent_detector / self.thermometric_parameter) * (1 / self.discontinuous_sensitivity)
+            self.temperature_err_function = (total_err * (1 - percent_detector) / self.thermometric_parameter) * (1 / self.discontinuous_sensitivity)
+
+            if self.error_bar_plot_detector is not None:
+                self.error_bar_plot_detector[0].remove()
+                self.error_bar_plot_function[0].remove()
+            self.error_bar_plot_detector = self.fitting_canvas.error_axes.bar(
                 self.thermmap.temperatures,
-                self.temperature_err,
+                self.temperature_err_detector,
                 color='#E56B6F',
                 width=8
+            )
+            self.error_bar_plot_function = self.fitting_canvas.error_axes.bar(
+                self.thermmap.temperatures,
+                self.temperature_err_function,
+                color='#6D597A',
+                width=8,
+                bottom=self.temperature_err_detector
             )
             self.fitting_canvas.error_axes.set_ylim(0, 2)
             self.fitting_canvas.error_axes.set_ylabel(r'Error / $\mathrm{K}$')
@@ -768,9 +832,10 @@ class MainWindow(QMainWindow):
         result_dict['Fit temperature / K'] = self.fit_x
         result_dict['Fitted parameter'] = self.fitted_output_data
         result_dict['Relative sensitivity / %K^(-1)'] = self.sensitivity
-        if self.temperature_err is not None:
+        if self.temperature_err_detector is not None:
             result_dict['Error temperature / K'] = self.thermmap.temperatures
-            result_dict['Temperature error / K'] = self.temperature_err
+            result_dict['Temperature error (detector) / K'] = self.temperature_err_detector
+            result_dict['Temperature error (function) / K'] = self.temperature_err_function
         for index, fitted_parameter in enumerate(signature(list(dict_of_fitting_functions.values())[self.fitting_functions_layout.currentIndex()]).parameters):
             if index == 0:
                 continue
