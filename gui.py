@@ -364,6 +364,9 @@ class MainWindow(QMainWindow):
             maximum=self.thermmap.data[-1, 0],
             singleStep=self.thermmap.resolution
         )
+        self.swap_widget = QPushButton('Swap')
+        self.swap_widget.clicked.connect(self.on_wavelength_switch)
+        layout_wavelengths_chooser.addRow(QLabel(''), self.swap_widget)
         self.second_value_widget.setKeyboardTracking(False)
         self.second_value_widget.setMinimumWidth(150)
         self.second_value_widget.valueChanged.connect(self.on_second_value_changed)
@@ -579,6 +582,12 @@ class MainWindow(QMainWindow):
         self.second_click = False
         self.canvas.draw()
         self.normalized_canvas.draw()
+    
+    def on_wavelength_switch(self):
+        if (self.second_line_position is not None) and (self.first_line_position is not None):
+            _temp_value = self.first_value_widget.value()
+            self.first_value_widget.setValue(self.second_line_position)
+            self.second_value_widget.setValue(_temp_value)
 
     def on_normalization_value_changed(self, value):
         new_value = quantization_to_resolution(value, self.thermmap.resolution)
@@ -781,14 +790,14 @@ class MainWindow(QMainWindow):
             if dialog.smoothed_detector_error_checkbox.isChecked():
                 self.smoothed_data, self.smoothed_residual = dialog.smoothed_data, dialog.smoothed_residual
 
-                detector_err = self.thermometric_parameter * sqrt((self.thermmap.general_get_row_of_ydata(self.smoothed_residual, self.first_line_position) / self.thermmap.get_row_of_ydata(self.first_line_position))**2 + 
+                detector_err = sqrt((self.thermmap.general_get_row_of_ydata(self.smoothed_residual, self.first_line_position) / self.thermmap.get_row_of_ydata(self.first_line_position))**2 + 
                                                               (self.thermmap.general_get_row_of_ydata(self.smoothed_residual, self.second_line_position) / self.thermmap.get_row_of_ydata(self.second_line_position))**2)
             elif dialog.constant_detector_error_checkbox.isChecked():
                 constant_err = dialog.constant_detector_error_spinbox.value()
-                detector_err = self.thermometric_parameter * sqrt((constant_err / self.thermmap.get_row_of_ydata(self.first_line_position))**2 + (constant_err / self.thermmap.get_row_of_ydata(self.second_line_position))**2)
+                detector_err =  sqrt((constant_err / self.thermmap.get_row_of_ydata(self.first_line_position))**2 + (constant_err / self.thermmap.get_row_of_ydata(self.second_line_position))**2)
             if dialog.easy_function_error_checkbox.isChecked():
                 # function_err = list(dict_of_fitting_errors_functions.values())[self.fitting_functions_layout.currentIndex()](self.thermometric_parameter, *self.fitted_output_parameters, *self.parameter_errors)
-                function_err = abs(self.thermometric_parameter - list(dict_of_fitting_functions.values())[self.fitting_functions_layout.currentIndex()](self.thermometric_parameter, *self.fitted_output_parameters))
+                function_err = abs(self.thermometric_parameter - list(dict_of_fitting_functions.values())[self.fitting_functions_layout.currentIndex()](self.thermometric_parameter, *self.fitted_output_parameters)) / list(dict_of_fitting_functions.values())[self.fitting_functions_layout.currentIndex()](self.thermometric_parameter, *self.fitted_output_parameters)
             else:
                 function_err = 0
 
@@ -796,8 +805,8 @@ class MainWindow(QMainWindow):
 
             percent_detector = detector_err / (detector_err + function_err)
 
-            self.temperature_err_detector = (total_err * percent_detector / self.thermometric_parameter) * (1 / self.discontinuous_sensitivity)
-            self.temperature_err_function = (total_err * (1 - percent_detector) / self.thermometric_parameter) * (1 / self.discontinuous_sensitivity)
+            self.temperature_err_detector = (total_err * percent_detector) * (1 / self.discontinuous_sensitivity)
+            self.temperature_err_function = (total_err * (1 - percent_detector)) * (1 / self.discontinuous_sensitivity)
 
             if self.error_bar_plot_detector is not None:
                 self.error_bar_plot_detector[0].remove()
