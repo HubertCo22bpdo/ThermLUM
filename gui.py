@@ -388,6 +388,8 @@ class MainWindow(QMainWindow):
         self.normalization_button.setCheckable(True)
         self.normalization_button.clicked.connect(self.on_normalization_button_clicked)
         layout_normalization_widgets.addWidget(self.normalization_button, 1, 0, 1, 2)
+        self.normalization_export_checkbox = QCheckBox('Export normalized spectra')
+        layout_normalization_widgets.addWidget(self.normalization_export_checkbox, 2, 0, 2, 2)
         layout_ribbon.addLayout(layout_normalization_widgets)
 
         self.create_thermometric_parameter_button = QPushButton('Create thermometric parameter')
@@ -834,8 +836,12 @@ class MainWindow(QMainWindow):
         result_dict = {
             'Wavlengths / nm': self.thermmap.data[:, 0],
         }
-        for index, temperature in enumerate(self.thermmap.temperatures):
-            result_dict[f'Intensity {temperature} K / cps'] = self.thermmap.data[:, index + 1]
+        if self.normalization_export_checkbox.isChecked() and self.normalization_position is not None:
+            for index, temperature in enumerate(self.thermmap.temperatures):
+                result_dict[f'Intensity {temperature} K norm to {self.normalization_position} nm'] = self.thermmap.normalize(self.normalization_position)[:, index + 1]
+        else:
+            for index, temperature in enumerate(self.thermmap.temperatures):
+                result_dict[f'Intensity {temperature} K / cps'] = self.thermmap.data[:, index + 1]
         result_dict['Temperature / K'] = self.thermmap.temperatures
         result_dict[f'Parameter {self.first_line_position} nm / {self.second_line_position} nm'] = self.thermometric_parameter
         result_dict['Fit temperature / K'] = self.fit_x
