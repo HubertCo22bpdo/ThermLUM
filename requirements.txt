@@ -1,8 +1,9 @@
 h5py
 matplotlib==3.8.0
-numpy
+numpy==1.26.4
 pandas
 PyQt6
 PyQt6_sip
 scipy
 requests
+superqt==0.7.5

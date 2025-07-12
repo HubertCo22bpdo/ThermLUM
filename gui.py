@@ -16,15 +16,15 @@ import json
 from inspect import signature
 from functools import partial
 from scipy.optimize import curve_fit
-from numpy import linspace, float64, gradient, sum, sqrt, diag, isclose, array
-from pandas import DataFrame, Series
+from numpy import linspace, float64, gradient, sum, sqrt, diag, isclose, array, log2, ceil, mean, std
+from pandas import DataFrame, Series, concat
 
 from PyQt6.QtWidgets import QDialog, QSpinBox, QDialogButtonBox, QLabel, QWidget, QVBoxLayout, \
     QApplication, QMainWindow, QFileDialog, QHBoxLayout, QGridLayout, QAbstractSpinBox, QComboBox, \
-    QFormLayout, QDoubleSpinBox, QPushButton, QStackedLayout, QSizePolicy, QCheckBox, QButtonGroup, QGroupBox
-from PyQt6.QtGui import QIcon
-from PyQt6.QtCore import Qt
-
+    QFormLayout, QDoubleSpinBox, QPushButton, QStackedLayout, QSizePolicy, QCheckBox, QButtonGroup, QGroupBox, QScrollArea, QScrollBar, QLineEdit
+from PyQt6.QtGui import QIcon, QDrag, QPixmap
+from PyQt6.QtCore import QMimeData, Qt, pyqtSignal, QTimer
+from superqt import QDoubleRangeSlider
 
 import matplotlib as mpl  # import matplotlib after PyQt6
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
@@ -33,7 +33,8 @@ from matplotlib.figure import Figure
 
 from creation import new
 from utilities import quantization_to_resolution
-from plotting import luminescence_dt
+from plotting import luminescence_dt, reproducibility_cycles, draw_std
+from thermmap_object import fluoracle_temerature_map_format
 from fitting_functions import dict_of_fitting_functions, dict_of_fitting_limits
 
 mpl.use("QtAgg")
@@ -263,8 +264,457 @@ class ErrorDeterminingDialog(QDialog):
         self.canvas.draw()
         self.residula_widget.setValue(sum(self.smoothed_residual[:, 1:]))
 
+class DragTargetIndicator(QLabel):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setContentsMargins(25, 5, 25, 5)
+        self.setStyleSheet(
+            "QLabel { background-color: #ccc; border: 2px solid black; border-radius: 4px; }"
+        )
 
+
+class DragItem(QLabel):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setContentsMargins(25, 5, 25, 5)
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setStyleSheet(
+            "border: 2px solid black;" \
+            "border-radius: 4px;")
+        # Store data separately from display label, but use label for default.
+        self.data = self.text()
+
+    def set_data(self, data):
+        self.data = data
+
+    def mouseMoveEvent(self, e):
+        if e.buttons() == Qt.MouseButton.LeftButton:
+            drag = QDrag(self)
+            mime = QMimeData()
+            drag.setMimeData(mime)
+
+            pixmap = QPixmap(self.size())
+            self.render(pixmap)
+            drag.setPixmap(pixmap)
+
+            drag.exec(Qt.DropAction.MoveAction)
+            self.show() # Show this widget again, if it's dropped outside.
+        if e.buttons() == Qt.MouseButton.RightButton:
+            self.deleteLater()
+            self.parentWidget().remove_item(self)
+            # self.parentWidget().orderChanged.emit(self.parentWidget().get_item_data())
+            
+
+
+class DragWidget(QWidget):
+    """
+    Generic list sorting handler.
+    """
+
+    orderChanged = pyqtSignal(list)
+
+    def __init__(self, *args, orientation=Qt.Orientation.Vertical, **kwargs):
+        super().__init__()
+        self.setAcceptDrops(True)
         
+
+        # Store the orientation for drag checks later.
+        self.orientation = orientation
+
+        if self.orientation == Qt.Orientation.Vertical:
+            self.blayout = QVBoxLayout()
+        else:
+            self.blayout = QHBoxLayout()
+
+        # Add the drag target indicator. This is invisible by default,
+        # we show it and move it around while the drag is active.
+        self._drag_target_indicator = DragTargetIndicator()
+        self.blayout.addWidget(self._drag_target_indicator)
+        self._drag_target_indicator.hide()
+
+        self.setLayout(self.blayout)
+
+    def dragEnterEvent(self, e):
+        e.accept()
+
+    def dragLeaveEvent(self, e):
+        self._drag_target_indicator.hide()
+        e.accept()
+
+    def dragMoveEvent(self, e):
+        # Find the correct location of the drop target, so we can move it there.
+        index = self._find_drop_location(e)
+        if index is not None:
+            # Inserting moves the item if its alreaady in the layout.
+            self.blayout.insertWidget(index, self._drag_target_indicator)
+            # Hide the item being dragged.
+            e.source().hide()
+            # Show the target.
+            self._drag_target_indicator.show()
+        e.accept()
+
+    def dropEvent(self, e):
+        widget = e.source()
+        # Use drop target location for destination, then remove it.
+        self._drag_target_indicator.hide()
+        index = self.blayout.indexOf(self._drag_target_indicator)
+        if index is not None:
+            self.blayout.insertWidget(index, widget)
+            self.orderChanged.emit(self.get_item_data())
+            widget.show()
+            self.blayout.activate()
+        e.accept()
+
+    def _find_drop_location(self, e):
+        pos = e.position()
+        spacing = self.blayout.spacing() / 2
+
+        for n in range(self.blayout.count()):
+            # Get the widget at each index in turn.
+            w = self.blayout.itemAt(n).widget()
+
+            if self.orientation == Qt.Orientation.Vertical:
+                # Drag drop vertically.
+                drop_here = (
+                    pos.y() >= w.y() - spacing
+                    and pos.y() <= w.y() + w.size().height() + spacing
+                )
+            else:
+                # Drag drop horizontally.
+                drop_here = (
+                    pos.x() >= w.x() - spacing
+                    and pos.x() <= w.x() + w.size().width() + spacing
+                )
+
+            if drop_here:
+                # Drop over this target.
+                break
+
+        return n
+
+    def add_item(self, item):
+        self.blayout.addWidget(item)
+
+    # def remove_item(self, item):
+    #     data = item.data
+    #     self.blayout.removeWidget(item)
+    #     item.deleteLater()
+    #     item = None
+    #     self.orderChanged.emit((data, self.get_item_data()))
+
+    def remove_item(self, item):
+        if item is None or not isinstance(item, QWidget):
+            return
+
+        data = item.data if hasattr(item, 'data') else None
+        self.blayout.removeWidget(item)
+
+        # Hide it first, let Qt finish layout updates before deleting.
+        item.hide()
+        QTimer.singleShot(0, item.deleteLater)  # Defer deletion
+
+        self.orderChanged.emit((data, self.get_item_data()))
+
+    def get_item_data(self):
+        data = []
+        for n in range(self.blayout.count()):
+            # Get the widget at each index in turn.
+            w = self.blayout.itemAt(n).widget()
+            if w != self._drag_target_indicator:
+                # The target indicator has no data.
+                data.append(w.data)
+        return data
+
+class RepeatabilityDialog(QDialog):
+    def __init__(self, thermmap, numerator, denominator, list_of_indexes, parent=None):
+        super(RepeatabilityDialog, self).__init__(parent)
+        self.thermmap = thermmap
+        self.numerator = numerator
+        self.denominator = denominator
+        self.list_of_rep_indexes = list_of_indexes
+        self.current_data_format = 'fluoracle_temerature_map'
+        self.statistics_dict = None
+        self.numerator_rep_data = None
+        self.denominator_rep_data = None
+        self.parameter_rep_data = None
+
+        self.setWindowTitle("Repeatability")
+        self.setWindowIcon(QIcon(r'.\icon\app_icon.tiff'))
+
+        self.scrol = QScrollArea(self)
+        self.scrol.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        # self.scrol.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scrol.setWidgetResizable(True)
+        self.scrol.setSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.MinimumExpanding)
+        self.scrol.setMinimumWidth(350)
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)  # Layout for scrollable content
+        scroll_content.setLayout(scroll_layout)
+        
+        layout_outer = QGridLayout()
+        layout_plot = QVBoxLayout()
+        layout_control = QGridLayout()
+
+        self.canvas = MplCanvas(self)
+        self.canvas.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum)
+        toolbar = NavigationToolbar(self.canvas, self)
+
+        self.drag = DragWidget()
+        # self.drag_items_list = []
+
+        #TODO: somewhere here format choosing options other than fluorcale - temperature map
+        self.add_rep_data_button = QPushButton('Add repeatability data')
+        self.add_rep_data_button.setAutoDefault(False)
+        self.add_rep_data_button.clicked.connect(self.add_rep_data)
+        # self.add_rep_data_button.setMaximumWidth(150)
+        # scroll_layout.addWidget(self.add_rep_data_button)
+
+        scroll_layout.addWidget(self.drag, alignment=Qt.AlignmentFlag.AlignVCenter)
+        self.scrol.setWidget(scroll_content)
+
+        # Control panel of dialog with additional funcionalities
+        self.intensity_numerator_box = QCheckBox(f'Intensity at {self.numerator} nm')
+        self.intensity_numerator_box.setCheckState(Qt.CheckState.Unchecked)
+        self.intensity_numerator_box.stateChanged.connect(lambda: self.update(self.drag.get_item_data()))
+        layout_control.addWidget(self.intensity_numerator_box, 0, 0)
+        self.intensity_denominator_box = QCheckBox(f'Intensity at {self.denominator} nm')
+        self.intensity_denominator_box.setCheckState(Qt.CheckState.Unchecked)
+        self.intensity_denominator_box.stateChanged.connect(lambda: self.update(self.drag.get_item_data()))
+        layout_control.addWidget(self.intensity_denominator_box, 0, 1)
+        self.parameter_box = QCheckBox(f'Ratiometric parameter')
+        self.parameter_box.setCheckState(Qt.CheckState.Checked)
+        self.parameter_box.stateChanged.connect(lambda: self.update(self.drag.get_item_data()))
+        layout_control.addWidget(self.parameter_box, 0, 2)
+        self.description_of_slider = QLabel('Limits of temperature range of imported data:')
+        layout_control.addWidget(self.description_of_slider, 1, 0, 1, 3, alignment=Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom)
+        self.left_limit_value_spin = QDoubleSpinBox()
+        self.left_limit_value_spin.setMaximum(float(settings["max_temperature"]))
+        self.left_limit_value_spin.setValue(0.0)
+        self.left_limit_value_spin.setKeyboardTracking(False)
+        self.left_limit_value_spin.setMinimumWidth(150)
+        layout_control.addWidget(self.left_limit_value_spin, 2, 0)
+        self.left_limit_value_spin.valueChanged.connect(self.on_left_limit_changed)
+        self.limit_range_slider = QDoubleRangeSlider(Qt.Orientation.Horizontal)
+        self.limit_range_slider.setRange(0.0, float(settings["max_temperature"]))
+        self.limit_range_slider.setValue((0.0, float(settings["max_temperature"])))
+        self.limit_range_slider.valueChanged.connect(self.slider_changed)
+        layout_control.addWidget(self.limit_range_slider, 2, 1)
+        self.right_limit_value_spin = QDoubleSpinBox()
+        self.right_limit_value_spin.setKeyboardTracking(False)
+        self.right_limit_value_spin.setMinimumWidth(150)
+        self.right_limit_value_spin.setMaximum(float(settings["max_temperature"]))
+        self.right_limit_value_spin.setValue(float(settings["max_temperature"]))
+        self.right_limit_value_spin.valueChanged.connect(self.on_right_limit_changed)
+        layout_control.addWidget(self.right_limit_value_spin, 2, 2)
+        self.temps_to_drop_edit = QLineEdit()
+        self.temps_to_drop_edit.setPlaceholderText('Temperatures to drop, e.g.: 0.0,10.0,25.0')
+        layout_control.addWidget(self.temps_to_drop_edit, 3, 0, 1, 3)
+        self.delete_all_button = QPushButton('Delete all data')
+        self.delete_all_button.setAutoDefault(False)
+        self.delete_all_button.clicked.connect(self.delete_all_data)
+        layout_control.addWidget(self.delete_all_button, 4, 0, 1, 3)
+        self.statistics_button = QPushButton('Calculate Standard Deviations')
+        self.statistics_button.setAutoDefault(False)
+        self.statistics_button.clicked.connect(self.calculate_statistics)
+        self.statistics_button.setEnabled(False)
+        layout_control.addWidget(self.statistics_button, 5, 0, 1, 2)
+        self.statistics_std_box = QCheckBox('Population')
+        self.statistics_std_box.setCheckState(Qt.CheckState.Checked)
+        layout_control.addWidget(self.statistics_std_box, 5, 2)
+        self.export_button = QPushButton('Export Data')
+        self.export_button.setAutoDefault(False)
+        self.export_button.clicked.connect(self.export_data)
+        self.export_button.setEnabled(False)
+        layout_control.addWidget(self.export_button, 6, 0, 1, 3)
+        # QButtons = (QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        # self.button_box = QDialogButtonBox(QButtons)
+        # self.button_box.accepted.connect(self.accept)
+        # self.button_box.rejected.connect(self.reject)
+        # layout_control.addWidget(self.button_box, 7, 0, 1, 3, alignment=Qt.AlignmentFlag.AlignBaseline)
+
+        layout_outer.addLayout(layout_plot, 0, 0, 2, 1)
+        layout_outer.addWidget(self.add_rep_data_button, 0, 1)
+        layout_outer.addWidget(self.scrol, 1, 1)
+        layout_outer.addLayout(layout_control, 0, 2, 3, 1)
+        layout_plot.addWidget(toolbar)
+        layout_plot.addWidget(self.canvas)
+
+        if 'Repeatability' in self.thermmap.file[self.thermmap.name].keys():
+            rep_group = self.thermmap.file[self.thermmap.name]['Repeatability']
+            for index in self.list_of_rep_indexes:
+                drag_item = DragItem(f'<b>{rep_group[f'rep_data_{index}'].attrs['File Name']}</b>\n'
+                            f'{rep_group[f'rep_data_{index}'].attrs['Temperatures']}')
+                drag_item.set_data(index)
+                drag_item.maximumHeight = 100
+                self.drag.add_item(drag_item)
+
+            self.update(self.drag.get_item_data())
+            self.statistics_button.setEnabled(True)
+            self.export_button.setEnabled(True)  
+
+        self.setLayout(layout_outer)
+        self.drag.orderChanged.connect(self.update)
+
+
+
+
+    def add_rep_data(self):
+        start_path = path.expanduser(settings['recently_opened_folder'])
+
+        filters = 'CSV Files (*.csv);;Text Files (*.txt);;Data Files (*.dat)'
+        selectedFilter = settings['default_file_type']
+
+
+        file_path_list, filter = QFileDialog.getOpenFileNames(
+            None, "Choose files", start_path,
+            filters, selectedFilter)
+
+        if file_path_list != []:
+            settings['recently_opened_folder'] = path.split(file_path_list[0])[0]
+
+            for file_path in file_path_list:
+                if self.current_data_format == 'fluoracle_temerature_map':
+                    data, temp_data, additional_information = fluoracle_temerature_map_format(file_path)
+
+                try:
+                    list_of_limits = [float(x) for x in self.temps_to_drop_edit.text().split(',')]
+                except:
+                    list_of_limits = []
+
+                rep_index = self.thermmap.add_repeatability_data(*self.thermmap.limit_temperature_range(data, temp_data, additional_information, lower_lim=self.left_limit_value_spin.value(), upper_lim=self.right_limit_value_spin.value(), list_of_lim=list_of_limits))
+
+                drag_item = DragItem(f'<b>{additional_information['File Name']}</b>\n'
+                                f'{additional_information['Temperatures']}')
+                drag_item.set_data(rep_index)
+                drag_item.maximumHeight = 100
+                self.drag.add_item(drag_item)
+
+            self.update(self.drag.get_item_data())
+            self.statistics_button.setEnabled(True)
+            self.export_button.setEnabled(True)
+
+    def on_left_limit_changed(self, value):
+        if value < self.limit_range_slider.value()[1]:
+            self.limit_range_slider.setSliderPosition((float(value), self.limit_range_slider.value()[1]))
+        else:
+            self.limit_range_slider.setValue((self.limit_range_slider.value()[1], self.limit_range_slider.value()[1]))
+
+    def on_right_limit_changed(self, value):
+        if value > self.limit_range_slider.value()[0]:
+            
+            self.limit_range_slider.setValue((self.limit_range_slider.value()[0], float(value)))
+        else:
+            self.limit_range_slider.setValue((self.limit_range_slider.value()[0], self.limit_range_slider.value()[0]))
+
+    def slider_changed(self, tuple):
+        self.left_limit_value_spin.setValue(tuple[0])
+        self.right_limit_value_spin.setValue(tuple[1])
+
+    def delete_rep_data(self, rep_index):
+        self.thermmap.remove_repeatability_data(rep_index)
+
+    def delete_all_data(self):
+        items_to_remove = [
+            self.drag.blayout.itemAt(n).widget()
+            for n in range(self.drag.blayout.count())
+            if isinstance(self.drag.blayout.itemAt(n).widget(), DragItem)
+        ]
+        for w in items_to_remove:
+            self.drag.remove_item(w)
+        # for _ in range(int(ceil(log2(len(self.list_of_rep_indexes)))) + 1):
+        #     for n in range(0, self.drag.blayout.count()):
+        #         # Get the widget at each index in turn.
+        #         try:
+        #             w = self.drag.blayout.itemAt(n).widget()
+        #         except:
+        #             pass
+        #         if isinstance(w, DragItem):
+        #             w.deleteLater()
+        #             self.drag.remove_item(w)
+
+        self.statistics_dict = None
+        self.update(self.drag.get_item_data()) 
+
+    def update(self, indexes):
+        self.canvas.axes.clear()
+        self.list_of_rep_indexes = self.drag.get_item_data()
+        if self.statistics_dict != None:
+            self._calculate_statistics()
+        if self.list_of_rep_indexes != []:
+            if self.intensity_numerator_box.isChecked() == True:
+                self.numerator_rep_data, self.canvas.axes = reproducibility_cycles(self.thermmap.repeatability(indexes, self.numerator, self.denominator, 'N'), self.canvas.axes, color='#ffd656', return_list_of_values=True)
+            else:
+                self.numerator_rep_data = None
+            if self.intensity_denominator_box.isChecked() == True:
+                self.denominator_rep_data, self.canvas.axes = reproducibility_cycles(self.thermmap.repeatability(indexes, self.numerator, self.denominator, 'D'), self.canvas.axes, color='#E56B6F', return_list_of_values=True)
+            else:
+                self.denominator_rep_data = None
+            if self.parameter_box.isChecked() == True:
+                self.parameter_rep_data, self.canvas.axes = reproducibility_cycles(self.thermmap.repeatability(indexes, self.numerator, self.denominator), self.canvas.axes, color='#6D597A', return_list_of_values=True)
+                if self.statistics_dict != None:
+                    self.canvas.axes = draw_std(
+                        self.canvas.axes, 
+                        self.statistics_dict, 
+                        colormap=mpl.colors.LinearSegmentedColormap.from_list(
+                            name='',
+                            colors=settings["plot_colormap"],
+                            N=len(self.statistics_dict.keys())
+                            ))
+            else:
+                self.parameter_rep_data = None
+        else:
+            self.statistics_button.setEnabled(False)
+            self.export_button.setEnabled(False) 
+        self.canvas.draw()
+
+    def _calculate_statistics(self):
+        all_data = self.thermmap.repeatability(self.list_of_rep_indexes, self.numerator, self.denominator)
+        temp_values_data = {}
+        temp_mean_std_data = {}
+        rep_group = self.thermmap.file[self.thermmap.name]['Repeatability']
+        for index, rep_index in enumerate(self.list_of_rep_indexes):
+            for pos, temperature in enumerate(rep_group[f'rep_temperatures_{rep_index}']):
+                try:
+                    if temperature not in temp_values_data.keys():
+                        temp_values_data[temperature] = [all_data[index][pos]]
+                    else:
+                        temp_values_data[temperature].append(all_data[index][pos])
+                except:
+                    continue
+        for temperature in temp_values_data.keys():
+            #Newer version of numPy allows use calculated means: std(mean=calculated_mean)
+            calculated_mean = mean(temp_values_data[temperature])
+            temp_mean_std_data[temperature] = (
+                float(temperature), 
+                calculated_mean, 
+                std(
+                    temp_values_data[temperature], 
+                    ddof=0 if self.statistics_std_box.isChecked == True else 1, 
+                    ))
+        
+        self.statistics_dict = temp_mean_std_data
+
+    def calculate_statistics(self):
+        self.statistics_dict = True
+        self.update(self.drag.get_item_data()) 
+
+    def export_data(self):
+        columns = [f'Intensity for {self.numerator} nm', f'Intensity for {self.denominator} nm', f'Parameter {self.numerator} / {self.denominator}']
+        full_data = {}
+        for data, column in zip([self.numerator_rep_data, self.denominator_rep_data, self.parameter_rep_data], columns):
+            if data is not None:
+                full_data[column] = data
+        if self.statistics_dict is not None:
+            stats_df = DataFrame.from_dict(self.statistics_dict, orient='index', columns=['Temperature / K', 'Mean', 'Standard deviation'])
+            full_data['Temperature / K'] = list(stats_df['Temperature / K'])
+            full_data['Mean'] = list(stats_df['Mean'])
+            full_data['Standard deviation'] = list(stats_df['Standard deviation'])
+        result = DataFrame(dict([(key, Series(value)) for key, value in full_data.items()]))
+        if settings['fast_export']:
+            result.to_csv(path.join(settings['recently_opened_folder'], f'Repeatablility {self.numerator}l{self.denominator}.csv'))
+        else:
+            filename = QFileDialog.getSaveFileName(caption='Save result to a file', directory=settings['recently_opened_folder'], filter='CSV Files (*.csv);;Text Files (*.txt);;Data Files (*.dat);;All files (*.*)', initialFilter='CSV Files (*.csv)')
+            result.to_csv(filename)
 
 
 
@@ -324,6 +774,7 @@ class MainWindow(QMainWindow):
         self.error_bar_plot_function = None
         self.temperature_err_detector = None
         self.temperature_err_function = None
+        self.list_of_rep_indexes = []
 
         self.cid1 = self.canvas.mpl_connect('button_press_event', self.on_click)
         self.cid2 = self.canvas.mpl_connect('pick_event', self.on_pick)
@@ -463,8 +914,13 @@ class MainWindow(QMainWindow):
         self.determine_error_button.clicked.connect(self.determine_error)
         layout_ribbon.addWidget(self.determine_error_button)
 
+        self.repeatability_button = QPushButton('Repeatability')
+        # self.repeatability_button.setEnabled(False)
+        self.repeatability_button.clicked.connect(self.repeatability)
+        layout_ribbon.addWidget(self.repeatability_button)
+
         self.export_data_button = QPushButton('Export Data')
-        self.export_data_button.setEnabled(False)
+        # self.export_data_button.setEnabled(False)
         self.export_data_button.clicked.connect(self.export_data)
         layout_ribbon.addWidget(self.export_data_button)
 
@@ -710,7 +1166,6 @@ class MainWindow(QMainWindow):
     def on_block_parameter(self, button, index):
         checked = button.isChecked()
         self.blocked_parameters[self.fitting_functions_layout.currentIndex()][index] = True if checked else False
-        print(self.blocked_parameters)
 
     def start_fitting(self):
         if self.fitting_canvas is None:
@@ -784,7 +1239,7 @@ class MainWindow(QMainWindow):
         
         self.fitting_canvas.draw()
         self.determine_error_button.setEnabled(True)
-        self.export_data_button.setEnabled(True)
+        # self.export_data_button.setEnabled(True)
 
     def determine_error(self):
         dialog = ErrorDeterminingDialog(self.thermmap, self)
@@ -831,6 +1286,16 @@ class MainWindow(QMainWindow):
             self.fitting_canvas.draw()
         else:
             return
+    
+    def repeatability(self):
+        if ((self.first_line_position is not None) and (self.first_line_position is not None)):
+            dialog = RepeatabilityDialog(self.thermmap, self.first_line_position, self.second_line_position, self.list_of_rep_indexes, self)
+        else:
+            return
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.list_of_rep_indexes = dialog.list_of_rep_indexes
+        else:
+            self.list_of_rep_indexes = dialog.list_of_rep_indexes
 
     def export_data(self):
         result_dict = {
@@ -842,15 +1307,18 @@ class MainWindow(QMainWindow):
         else:
             for index, temperature in enumerate(self.thermmap.temperatures):
                 result_dict[f'Intensity {temperature} K / cps'] = self.thermmap.data[:, index + 1]
-        result_dict['Temperature / K'] = self.thermmap.temperatures
-        result_dict[f'Parameter {self.first_line_position} nm / {self.second_line_position} nm'] = self.thermometric_parameter
-        result_dict['Fit temperature / K'] = self.fit_x
-        result_dict['Fitted parameter'] = self.fitted_output_data
-        result_dict['Relative sensitivity / %K^(-1)'] = self.sensitivity
+        if self.first_line_position is not None and self.second_line_position is not None:
+            result_dict['Temperature / K'] = self.thermmap.temperatures
+            result_dict[f'Parameter {self.first_line_position} nm / {self.second_line_position} nm'] = self.thermometric_parameter
+        if self.fitting_plot is not None:
+            result_dict['Fit temperature / K'] = self.fit_x
+            result_dict['Fitted parameter'] = self.fitted_output_data
+            result_dict['Relative sensitivity / %K^(-1)'] = self.sensitivity
         if self.temperature_err_detector is not None:
             result_dict['Error temperature / K'] = self.thermmap.temperatures
             result_dict['Temperature error (detector) / K'] = self.temperature_err_detector
             result_dict['Temperature error (function) / K'] = self.temperature_err_function
+            result_dict['Sum of errors / K'] = self.temperature_err_detector + self.temperature_err_function
         for index, fitted_parameter in enumerate(signature(list(dict_of_fitting_functions.values())[self.fitting_functions_layout.currentIndex()]).parameters):
             if index == 0:
                 continue

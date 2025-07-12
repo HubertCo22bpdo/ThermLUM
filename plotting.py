@@ -23,3 +23,28 @@ def luminescence_dt(data, temperatures, axes: plt.Axes, colormap):
         counter += 1
 
     return axes
+
+def reproducibility_cycles(data, axes: plt.Axes, color, return_list_of_values=False):
+    list_of_values = []
+    # number_of_points = 0
+    for dataset in data:
+        list_of_values.extend(dataset)
+        # number_of_points += len(dataset)
+    axes.plot(list_of_values, color=color, marker='o', mfc='none', ls='-')
+    axes.set_xlabel('Cycles')
+    axes.set_ylabel('Thermometric parameter')
+
+    if return_list_of_values:
+        return (list_of_values, axes)
+    else:
+        return axes
+
+def draw_std(axes, temp_mean_std_data_dict, colormap):
+    for pos, temperature in enumerate(sorted(temp_mean_std_data_dict.keys(), key=lambda dkey: float(dkey))):
+        mean = temp_mean_std_data_dict[temperature][1]
+        std = temp_mean_std_data_dict[temperature][2]
+        N = len(temp_mean_std_data_dict.keys())
+        axes.axhspan(mean-std, mean+std, color=colormap(((pos+1)/N)), alpha=0.3)
+        axes.axhline(mean, ls='--', color=colormap(((pos+1)/N)))
+        
+    return axes

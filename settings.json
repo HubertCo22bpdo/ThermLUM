@@ -17,5 +17,6 @@
 "plot_width": 5.5,
 "plot_height": 5,
 "plot_dpi": 110,
-"fast_export": true
+"fast_export": true,
+"max_temperature": 1000.0
 }
